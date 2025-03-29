@@ -241,6 +241,6 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
  	})
 
 	log.Infof("apiLiveStats - PokemonCache : %d pokemon_cached, %d pokemon_no_timer, %d pokemon_expired, %d pokemon_active, %d pokemon_active_iv, %d pokemon_active_100iv, %d pokemon_active_shiny, total time %s", liveStats.PokemonCached, liveStats.PokemonNoTimer, liveStats.PokemonExpired, liveStats.PokemonActive, liveStats.PokemonActiveIv, liveStats.PokemonActive100iv, liveStats.PokemonActiveShiny, time.Since(start))
-	log.Infof("apiLiveStats - PokemonLookupCache : %d pokemon_lookup_cached, %d pokemon_lookup_no_timer, %d pokemon_lookup_expired, %d pokemon_lookup_active, %d pokemon_lookup_active_iv, %d pokemon_lookup_active_100iv, total time %s", liveStats.PokemonLookupNoTimer, liveStats.PokemonLookupCached, liveStats.PokemonLookupExpired, liveStats.PokemonLookupActive, liveStats.PokemonLookupActiveIv, liveStats.PokemonLookupActive100iv, time.Since(start))
+	log.Infof("apiLiveStats - PokemonLookupCache : %d pokemon_lookup_cached, %d pokemon_lookup_no_timer, %d pokemon_lookup_expired, %d pokemon_lookup_active, %d pokemon_lookup_active_iv, %d pokemon_lookup_active_100iv, total time %s", liveStats.PokemonLookupCached, liveStats.PokemonLookupNoTimer, liveStats.PokemonLookupExpired, liveStats.PokemonLookupActive, liveStats.PokemonLookupActiveIv, liveStats.PokemonLookupActive100iv, time.Since(start))
 	return liveStats
 }
