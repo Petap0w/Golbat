@@ -162,12 +162,14 @@ func GetOnePokemon(pokemonId uint64) *Pokemon {
 
 type ApiPokemonLiveStatsResult struct {
     PokemonCached      int `json:"pokemon_cached"`
+    PokemonNoTimer      int `json:"pokemon_no_timer"`
     PokemonExpired      int `json:"pokemon_expired"`
 	PokemonActive      int `json:"pokemon_active"`
 	PokemonActiveIv    int `json:"pokemon_active_iv"`
 	PokemonActive100iv int `json:"pokemon_active_100iv"`
 	PokemonActiveShiny int `json:"pokemon_active_shiny"`
     PokemonLookupCached      int `json:"pokemon_lookup_cached"`
+    PokemonLookupNoTimer      int `json:"pokemon_lookup_no_timer"`
     PokemonLookupExpired      int `json:"pokemon_lookup_expired"`
 	PokemonLookupActive      int `json:"pokemon_lookup_active"`
 	PokemonLookupActiveIv    int `json:"pokemon_lookup_active_iv"`
@@ -190,11 +192,16 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
 		0,
 		0,
 		0,
+		0,
+		0,
 	}
 
 	pokemonCache.Range(func(pokemonCacheEntry *ttlcache.Item[string, Pokemon]) bool {
 	    pokemon := pokemonCacheEntry.Value()
 	    liveStats.PokemonCached++
+	    if int64(valueOrMinus1(pokemon.ExpireTimestamp)) == -1 {
+	        liveStats.PokemonNoTimer++
+	    }
 	    if int64(valueOrMinus1(pokemon.ExpireTimestamp)) < now && int64(valueOrMinus1(pokemon.ExpireTimestamp)) > -1 {
 	        liveStats.PokemonExpired++
 	    }
@@ -215,6 +222,9 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
 
 	pokemonLookupCache.Range(func(key uint64, pokemon PokemonLookupCacheItem) bool {
 		liveStats.PokemonLookupCached++
+		if pokemon.PokemonLookup.ExpireTimestamp == -1 {
+		    liveStats.PokemonLookupNoTimer++
+        }
 		if pokemon.PokemonLookup.ExpireTimestamp < now && pokemon.PokemonLookup.ExpireTimestamp > -1 {
 		    liveStats.PokemonLookupExpired++
         }
