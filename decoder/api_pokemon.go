@@ -183,6 +183,13 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
 		0,
 		0,
 		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
 	}
 
 	pokemonCache.Range(func(pokemonCacheEntry *ttlcache.Item[string, Pokemon]) bool {
