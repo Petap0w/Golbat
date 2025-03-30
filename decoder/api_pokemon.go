@@ -210,7 +210,7 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
 	    }
 	    if int64(valueOrMinus1(pokemon.ExpireTimestamp)) < now && int64(valueOrMinus1(pokemon.ExpireTimestamp)) > -1 {
             if int64(valueOrMinus1(pokemon.ExpireTimestamp)) < liveStats.PokemonOldestExpiry {
-                liveStats.PokemonOldestExpiry := int64(valueOrMinus1(pokemon.ExpireTimestamp))
+                liveStats.PokemonOldestExpiry = int64(valueOrMinus1(pokemon.ExpireTimestamp))
             }
 	        liveStats.PokemonExpired++
 	    }
