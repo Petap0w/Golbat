@@ -249,6 +249,7 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
  		return true
  	})
 
+/*
  	pokemonCache.DeleteExpired()
 
 	pokemonCache.Range(func(pokemonCacheEntry *ttlcache.Item[string, Pokemon]) bool {
@@ -259,12 +260,12 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
 	    }
  		return true
  	})
-
+*/
     tm := time.Unix(liveStats.PokemonOldestExpiry, 0)
 
 	log.Infof("apiLiveStats - PokemonCache : %d pokemon_cached, %d pokemon_no_timer, %d pokemon_expired, %d pokemon_active_oldest_expiry, %d pokemon_active, %d pokemon_active_iv, %d pokemon_active_100iv, %d pokemon_active_shiny, total time %s", liveStats.PokemonCached, liveStats.PokemonNoTimer, liveStats.PokemonExpired, liveStats.PokemonOldestExpiry, liveStats.PokemonActive, liveStats.PokemonActiveIv, liveStats.PokemonActive100iv, liveStats.PokemonActiveShiny, time.Since(start))
 	log.Infof("apiLiveStats - PokemonLookupCache : %d pokemon_lookup_cached, %d pokemon_lookup_no_timer, %d pokemon_lookup_expired, %d pokemon_lookup_active, %d pokemon_lookup_active_iv, %d pokemon_lookup_active_100iv, total time %s", liveStats.PokemonLookupCached, liveStats.PokemonLookupNoTimer, liveStats.PokemonLookupExpired, liveStats.PokemonLookupActive, liveStats.PokemonLookupActiveIv, liveStats.PokemonLookupActive100iv, time.Since(start))
 	log.Infof("apiLiveStats - PokemonCache Oldest ExpiredTimestamp : %d pokemon_active_oldest_expiry, %s time ago", liveStats.PokemonOldestExpiry, time.Since(tm))
-	log.Infof("apiLiveStats - PokemonCache after DeleteExpired : %d pokemon_delete_expired_cached, %d pokemon_delete_expired_expired", liveStats.PokemonDeleteExpiredCached, liveStats.PokemonDeleteExpiredExpired)
+//	log.Infof("apiLiveStats - PokemonCache after DeleteExpired : %d pokemon_delete_expired_cached, %d pokemon_delete_expired_expired", liveStats.PokemonDeleteExpiredCached, liveStats.PokemonDeleteExpiredExpired)
 	return liveStats
 }
