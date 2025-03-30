@@ -168,7 +168,7 @@ type ApiPokemonLiveStatsResult struct {
 	PokemonActiveIv    int `json:"pokemon_active_iv"`
 	PokemonActive100iv int `json:"pokemon_active_100iv"`
 	PokemonActiveShiny int `json:"pokemon_active_shiny"`
-	PokemonOldestExpiry int `json:"pokemon_active_oldest_expiry"`
+	PokemonOldestExpiry int64 `json:"pokemon_active_oldest_expiry"`
     PokemonDeleteExpiredCached      int `json:"pokemon_delete_expired_cached"`
     PokemonDeleteExpiredExpired      int `json:"pokemon_delete_expired_expired"`
     PokemonLookupCached      int `json:"pokemon_lookup_cached"`
