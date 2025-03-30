@@ -191,7 +191,7 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
 		0,
 		0,
 		0,
-		99999999999999999999999999999,
+		9999999999,
 		0,
 		0,
 		0,
