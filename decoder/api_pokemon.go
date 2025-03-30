@@ -168,6 +168,9 @@ type ApiPokemonLiveStatsResult struct {
 	PokemonActiveIv    int `json:"pokemon_active_iv"`
 	PokemonActive100iv int `json:"pokemon_active_100iv"`
 	PokemonActiveShiny int `json:"pokemon_active_shiny"`
+	PokemonOldestExpiry int `json:"pokemon_active_oldest_expiry"`
+    PokemonDeleteExpiredCached      int `json:"pokemon_delete_expired_cached"`
+    PokemonDeleteExpiredExpired      int `json:"pokemon_delete_expired_expired"`
     PokemonLookupCached      int `json:"pokemon_lookup_cached"`
     PokemonLookupNoTimer      int `json:"pokemon_lookup_no_timer"`
     PokemonLookupExpired      int `json:"pokemon_lookup_expired"`
@@ -188,6 +191,9 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
 		0,
 		0,
 		0,
+		99999999999999999999999999999,
+		0,
+		0,
 		0,
 		0,
 		0,
@@ -203,6 +209,9 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
 	        liveStats.PokemonNoTimer++
 	    }
 	    if int64(valueOrMinus1(pokemon.ExpireTimestamp)) < now && int64(valueOrMinus1(pokemon.ExpireTimestamp)) > -1 {
+            if int64(valueOrMinus1(pokemon.ExpireTimestamp)) < liveStats.PokemonOldestExpiry {
+                liveStats.PokemonOldestExpiry := int64(valueOrMinus1(pokemon.ExpireTimestamp))
+            }
 	        liveStats.PokemonExpired++
 	    }
 		if int64(valueOrMinus1(pokemon.ExpireTimestamp)) > now {
@@ -240,7 +249,19 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
  		return true
  	})
 
-	log.Infof("apiLiveStats - PokemonCache : %d pokemon_cached, %d pokemon_no_timer, %d pokemon_expired, %d pokemon_active, %d pokemon_active_iv, %d pokemon_active_100iv, %d pokemon_active_shiny, total time %s", liveStats.PokemonCached, liveStats.PokemonNoTimer, liveStats.PokemonExpired, liveStats.PokemonActive, liveStats.PokemonActiveIv, liveStats.PokemonActive100iv, liveStats.PokemonActiveShiny, time.Since(start))
+ 	pokemonCache.DeleteExpired()
+
+	pokemonCache.Range(func(pokemonCacheEntry *ttlcache.Item[string, Pokemon]) bool {
+	    pokemon := pokemonCacheEntry.Value()
+	    liveStats.PokemonDeleteExpiredCached++
+	    if int64(valueOrMinus1(pokemon.ExpireTimestamp)) < now && int64(valueOrMinus1(pokemon.ExpireTimestamp)) > -1 {
+	        liveStats.PokemonDeleteExpiredExpired++
+	    }
+ 		return true
+ 	})
+
+	log.Infof("apiLiveStats - PokemonCache : %d pokemon_cached, %d pokemon_no_timer, %d pokemon_expired, %d pokemon_active_oldest_expiry, %d pokemon_active, %d pokemon_active_iv, %d pokemon_active_100iv, %d pokemon_active_shiny, total time %s", liveStats.PokemonCached, liveStats.PokemonNoTimer, liveStats.PokemonExpired, liveStats.PokemonOldestExpiry, liveStats.PokemonActive, liveStats.PokemonActiveIv, liveStats.PokemonActive100iv, liveStats.PokemonActiveShiny, time.Since(start))
+	log.Infof("apiLiveStats - PokemonCache after DeleteExpired : %d pokemon_delete_expired_cached, %d pokemon_delete_expired_expired", liveStats.PokemonDeleteExpiredCached, liveStats.PokemonDeleteExpiredExpired)
 	log.Infof("apiLiveStats - PokemonLookupCache : %d pokemon_lookup_cached, %d pokemon_lookup_no_timer, %d pokemon_lookup_expired, %d pokemon_lookup_active, %d pokemon_lookup_active_iv, %d pokemon_lookup_active_100iv, total time %s", liveStats.PokemonLookupCached, liveStats.PokemonLookupNoTimer, liveStats.PokemonLookupExpired, liveStats.PokemonLookupActive, liveStats.PokemonLookupActiveIv, liveStats.PokemonLookupActive100iv, time.Since(start))
 	return liveStats
 }
