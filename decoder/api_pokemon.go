@@ -213,7 +213,7 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
             if int64(valueOrMinus1(pokemon.ExpireTimestamp)) < liveStats.PokemonOldestExpiry {
                 liveStats.PokemonOldestExpiry = int64(valueOrMinus1(pokemon.ExpireTimestamp))
                 tm := time.Unix(liveStats.PokemonOldestExpiry, 0)
-                log.Infof("apiLiveStats - Debug PokemonCache Oldest ExpiredTimestamp : %d encounterId, %d pokemon_oldest_expiry (%s ago), ttl expires at %d (in %s)", pokemon.Id, liveStats.PokemonOldestExpiry, time.Since(tm), expiry.Unix(), time.Until(expiry))
+                log.Infof("apiLiveStats - Debug PokemonCache Oldest ExpiredTimestamp : %s encounterId, %d pokemon_oldest_expiry (%s ago), ttl expires at %d (in %s)", pokemon.Id, liveStats.PokemonOldestExpiry, time.Since(tm), expiry.Unix(), time.Until(expiry))
             }
 	        liveStats.PokemonExpired++
 	    }
