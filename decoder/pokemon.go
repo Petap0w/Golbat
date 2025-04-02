@@ -556,7 +556,6 @@ func (pokemon *Pokemon) remainingDuration(now int64) time.Duration {
 			remaining = time.Minute
 		}
 	}
-//	log.Infof("apiLiveStats DEBUG - Pokemon %s encounterId, %d verified, %s remaining", pokemon.Id, pokemon.ExpireTimestampVerified, remaining)
 	return remaining
 }
 
