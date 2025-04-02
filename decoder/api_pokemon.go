@@ -198,9 +198,9 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
 	        liveStats.PokemonNoTimer++
 	    }
         if pokemon.ExpireTimestampVerified {
-            liveStats.Verified++
+            liveStats.PokemonVerified++
         } else {
-            liveStats.NotVerified++
+            liveStats.PokemonNotVerified++
         }
 	    if int64(valueOrMinus1(pokemon.ExpireTimestamp)) < now && int64(valueOrMinus1(pokemon.ExpireTimestamp)) > -1 {
             if int64(valueOrMinus1(pokemon.ExpireTimestamp)) < liveStats.PokemonOldestExpiry {
@@ -227,7 +227,7 @@ func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
 
     tm := time.Unix(liveStats.PokemonOldestExpiry, 0)
 
-	log.Infof("apiLiveStats - PokemonCache : %d pokemon_cached, %d pokemon_no_timer, %d pokemon_expired, %d pokemon_active_oldest_expiry, %d pokemon_active, %d pokemon_active_iv, %d pokemon_active_100iv, %d pokemon_active_shiny, total time %s", liveStats.PokemonCached, liveStats.PokemonNoTimer, liveStats.PokemonExpired, liveStats.PokemonOldestExpiry, liveStats.PokemonActive, liveStats.PokemonActiveIv, liveStats.PokemonActive100iv, liveStats.PokemonActiveShiny, time.Since(start))
+	log.Infof("apiLiveStats - PokemonCache : %d pokemon_cached, %d pokemon_no_timer, %d pokemon_verified, %d pokemon_not_verified, %d pokemon_expired, %d pokemon_active_oldest_expiry, %d pokemon_active, %d pokemon_active_iv, %d pokemon_active_100iv, %d pokemon_active_shiny, total time %s", liveStats.PokemonCached, liveStats.PokemonNoTimer, liveStats.PokemonVerified, liveStats.PokemonNotVerified, liveStats.PokemonExpired, liveStats.PokemonOldestExpiry, liveStats.PokemonActive, liveStats.PokemonActiveIv, liveStats.PokemonActive100iv, liveStats.PokemonActiveShiny, time.Since(start))
 	log.Infof("apiLiveStats - PokemonCache Oldest ExpiredTimestamp : %d pokemon_oldest_expiry, %s time ago", liveStats.PokemonOldestExpiry, time.Since(tm).Round(time.Second))
 	return liveStats
 }
