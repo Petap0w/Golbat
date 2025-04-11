@@ -9,6 +9,7 @@ import (
 	"golbat/config"
 	"golbat/geo"
 
+	"github.com/jellydator/ttlcache/v3"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/rtree"
 )
@@ -156,4 +157,76 @@ func GetOnePokemon(pokemonId uint64) *Pokemon {
 		return &pokemon
 	}
 	return nil
+}
+
+type ApiPokemonLiveStatsResult struct {
+	PokemonCached       int   `json:"pokemon_cached"`
+	PokemonNoTimer      int   `json:"pokemon_no_timer"`
+	PokemonVerified     int   `json:"pokemon_verified"`
+	PokemonNotVerified  int   `json:"pokemon_not_verified"`
+	PokemonExpired      int   `json:"pokemon_expired"`
+	PokemonActive       int   `json:"pokemon_active"`
+	PokemonActiveIv     int   `json:"pokemon_active_iv"`
+	PokemonActive100iv  int   `json:"pokemon_active_100iv"`
+	PokemonActiveShiny  int   `json:"pokemon_active_shiny"`
+	PokemonOldestExpiry int64 `json:"pokemon_oldest_expiry"`
+}
+
+func GetLiveStatsPokemon() *ApiPokemonLiveStatsResult {
+	start := time.Now()
+	now := time.Now().Unix()
+
+	liveStats := &ApiPokemonLiveStatsResult{
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		9999999999,
+	}
+
+	pokemonCache.Range(func(pokemonCacheEntry *ttlcache.Item[uint64, Pokemon]) bool {
+		pokemon := pokemonCacheEntry.Value()
+//		ttlExpiry := pokemonCacheEntry.ExpiresAt()
+		liveStats.PokemonCached++
+		if int64(valueOrMinus1(pokemon.ExpireTimestamp)) == -1 {
+			liveStats.PokemonNoTimer++
+		}
+		if pokemon.ExpireTimestampVerified {
+			liveStats.PokemonVerified++
+		} else {
+			liveStats.PokemonNotVerified++
+		}
+		if int64(valueOrMinus1(pokemon.ExpireTimestamp)) < now && int64(valueOrMinus1(pokemon.ExpireTimestamp)) > -1 {
+			if int64(valueOrMinus1(pokemon.ExpireTimestamp)) < liveStats.PokemonOldestExpiry {
+				liveStats.PokemonOldestExpiry = int64(valueOrMinus1(pokemon.ExpireTimestamp))
+//				tm := time.Unix(liveStats.PokemonOldestExpiry, 0)
+//				log.Infof("apiLiveStats - Debug PokemonCache Oldest ExpiredTimestamp : %s encounterId, %v seenType, %d pokemon_oldest_expiry (%s ago), ttl expires at %d (in %s)", pokemon.Id, pokemon.SeenType, liveStats.PokemonOldestExpiry, time.Since(tm).Round(time.Second), ttlExpiry.Unix(), time.Until(ttlExpiry).Round(time.Second))
+			}
+			liveStats.PokemonExpired++
+		}
+		if int64(valueOrMinus1(pokemon.ExpireTimestamp)) > now {
+			liveStats.PokemonActive++
+			if !pokemon.Iv.IsZero() {
+				liveStats.PokemonActiveIv++
+			}
+			if bool(pokemon.Shiny.ValueOrZero()) {
+				liveStats.PokemonActiveShiny++
+			}
+			if int(pokemon.Iv.ValueOrZero()) == 100 {
+				liveStats.PokemonActive100iv++
+			}
+		}
+		return true
+	})
+
+	tm := time.Unix(liveStats.PokemonOldestExpiry, 0)
+
+	log.Infof("apiLiveStats - PokemonCache : %d pokemon_cached, %d pokemon_no_timer, %d pokemon_verified, %d pokemon_not_verified, %d pokemon_expired, %d pokemon_active_oldest_expiry, %d pokemon_active, %d pokemon_active_iv, %d pokemon_active_100iv, %d pokemon_active_shiny, total time %s", liveStats.PokemonCached, liveStats.PokemonNoTimer, liveStats.PokemonVerified, liveStats.PokemonNotVerified, liveStats.PokemonExpired, liveStats.PokemonOldestExpiry, liveStats.PokemonActive, liveStats.PokemonActiveIv, liveStats.PokemonActive100iv, liveStats.PokemonActiveShiny, time.Since(start))
+	log.Infof("apiLiveStats - PokemonCache Oldest ExpiredTimestamp : %d pokemon_oldest_expiry, %s time ago", liveStats.PokemonOldestExpiry, time.Since(tm).Round(time.Second))
+	return liveStats
 }
