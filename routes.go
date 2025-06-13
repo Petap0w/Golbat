@@ -91,6 +91,7 @@ func Raw(c *gin.Context) {
 	}
 
 	decodeError := false
+	errorReason := ""
 	uuid := ""
 	account := ""
 	level := 30
@@ -106,13 +107,14 @@ func Raw(c *gin.Context) {
 	pogodroidHeader := r.Header.Get("origin")
 	userAgent := r.Header.Get("User-Agent")
 
-	//log.Infof("Raw: Received data from %s", body)
-	//log.Infof("User agent is %s", userAgent)
+	log.Infof("Raw: Received data from %s", body)
+	log.Infof("User agent is %s", userAgent)
 
 	if pogodroidHeader != "" {
 		var raw []map[string]interface{}
 		if err := json.Unmarshal(body, &raw); err != nil {
 			decodeError = true
+			errorReason = "pogodroidHeader > unmarshal error"
 		} else {
 			for _, entry := range raw {
 				if latTarget == 0 && lonTarget == 0 {
@@ -145,6 +147,7 @@ func Raw(c *gin.Context) {
 		var raw map[string]interface{}
 		if err := json.Unmarshal(body, &raw); err != nil {
 			decodeError = true
+			errorReason = "no pogodroidHeader > unmarshal error"
 		} else {
 			if v := raw["have_ar"]; v != nil {
 				res, ok := v.(bool)
@@ -186,6 +189,7 @@ func Raw(c *gin.Context) {
 			contents, ok := raw["contents"].([]interface{})
 			if !ok {
 				decodeError = true
+    			errorReason = "no pogodroidHeader > raw[contents] not ok"
 
 			} else {
 
@@ -255,7 +259,7 @@ func Raw(c *gin.Context) {
 
 	if decodeError == true {
 		statsCollector.IncRawRequests("error", "decode")
-		log.Infof("Raw: Data could not be decoded. From User agent %s - Received data %s", userAgent, body)
+		log.Infof("Raw: Data could not be decoded. From User agent %s - Received data %s - Reason %s", userAgent, body, errorReason)
 
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 		w.WriteHeader(http.StatusUnprocessableEntity)
