@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ type Pokestop struct {
 	LastModifiedTimestamp      null.Int    `db:"last_modified_timestamp" json:"last_modified_timestamp"`
 	Updated                    int64       `db:"updated" json:"updated"`
 	Enabled                    null.Bool   `db:"enabled" json:"enabled"`
+	QuestSeed                  null.String `db:"quest_seed" json:"quest_seed,string"`
 	QuestType                  null.Int    `db:"quest_type" json:"quest_type"`
 	QuestTimestamp             null.Int    `db:"quest_timestamp" json:"quest_timestamp"`
 	QuestTarget                null.Int    `db:"quest_target" json:"quest_target"`
@@ -52,6 +54,7 @@ type Pokestop struct {
 	PowerUpLevel               null.Int    `db:"power_up_level" json:"power_up_level"`
 	PowerUpPoints              null.Int    `db:"power_up_points" json:"power_up_points"`
 	PowerUpEndTimestamp        null.Int    `db:"power_up_end_timestamp" json:"power_up_end_timestamp"`
+	AlternativeQuestSeed       null.String `db:"alternative_quest_seed" json:"alternative_quest_seed,string"`
 	AlternativeQuestType       null.Int    `db:"alternative_quest_type" json:"alternative_quest_type"`
 	AlternativeQuestTimestamp  null.Int    `db:"alternative_quest_timestamp" json:"alternative_quest_timestamp"`
 	AlternativeQuestTarget     null.Int    `db:"alternative_quest_target" json:"alternative_quest_target"`
@@ -77,6 +80,7 @@ type Pokestop struct {
 	//`last_modified_timestamp` int unsigned DEFAULT NULL,
 	//`updated` int unsigned NOT NULL,
 	//`enabled` tinyint unsigned DEFAULT NULL,
+	//`quest_seed` varchar(25) DEFAULT NULL,
 	//`quest_type` int unsigned DEFAULT NULL,
 	//`quest_timestamp` int unsigned DEFAULT NULL,
 	//`quest_target` smallint unsigned DEFAULT NULL,
@@ -98,6 +102,7 @@ type Pokestop struct {
 	//`power_up_level` smallint unsigned DEFAULT NULL,
 	//`power_up_points` int unsigned DEFAULT NULL,
 	//`power_up_end_timestamp` int unsigned DEFAULT NULL,
+	//`alternative_quest_seed` varchar(25) DEFAULT NULL,
 	//`alternative_quest_type` int unsigned DEFAULT NULL,
 	//`alternative_quest_timestamp` int unsigned DEFAULT NULL,
 	//`alternative_quest_target` smallint unsigned DEFAULT NULL,
@@ -118,13 +123,13 @@ func GetPokestopRecord(ctx context.Context, db db.DbDetails, fortId string) (*Po
 	pokestop := Pokestop{}
 	err := db.GeneralDb.GetContext(ctx, &pokestop,
 		`SELECT pokestop.id, lat, lon, name, url, enabled, lure_expire_timestamp, last_modified_timestamp,
-			pokestop.updated, quest_type, quest_timestamp, quest_target, quest_conditions,
+			pokestop.updated, quest_seed, quest_type, quest_timestamp, quest_target, quest_conditions,
 			quest_rewards, quest_template, quest_title,
 			alternative_quest_type, alternative_quest_timestamp, alternative_quest_target,
 			alternative_quest_conditions, alternative_quest_rewards,
 			alternative_quest_template, alternative_quest_title, cell_id, deleted, lure_id, sponsor_id, partner_id,
 			ar_scan_eligible, power_up_points, power_up_level, power_up_end_timestamp,
-			quest_expiry, alternative_quest_expiry, description, showcase_pokemon_id, showcase_pokemon_form_id,
+			quest_expiry, alternative_quest_seed, alternative_quest_expiry, description, showcase_pokemon_id, showcase_pokemon_form_id,
 			showcase_pokemon_type_id, showcase_ranking_standard, showcase_expiry, showcase_rankings
 			FROM pokestop
 			WHERE pokestop.id = ? `, fortId)
@@ -155,6 +160,7 @@ func hasChangesPokestop(old *Pokestop, new *Pokestop) bool {
 		old.LastModifiedTimestamp != new.LastModifiedTimestamp ||
 		old.Updated != new.Updated ||
 		old.Enabled != new.Enabled ||
+		old.QuestSeed != new.QuestSeed ||
 		old.QuestType != new.QuestType ||
 		old.QuestTimestamp != new.QuestTimestamp ||
 		old.QuestTarget != new.QuestTarget ||
@@ -173,6 +179,7 @@ func hasChangesPokestop(old *Pokestop, new *Pokestop) bool {
 		old.PowerUpLevel != new.PowerUpLevel ||
 		old.PowerUpPoints != new.PowerUpPoints ||
 		old.PowerUpEndTimestamp != new.PowerUpEndTimestamp ||
+		old.AlternativeQuestSeed != new.AlternativeQuestSeed ||
 		old.AlternativeQuestType != new.AlternativeQuestType ||
 		old.AlternativeQuestTimestamp != new.AlternativeQuestTimestamp ||
 		old.AlternativeQuestTarget != new.AlternativeQuestTarget ||
@@ -249,6 +256,7 @@ func (stop *Pokestop) updatePokestopFromQuestProto(questProto *pogo.FortSearchOu
 	}
 	questData := questProto.ChallengeQuest.Quest
 	questTitle := questProto.ChallengeQuest.QuestDisplay.Description
+	questSeed := int64(questData.QuestSeed)
 	questType := int64(questData.QuestType)
 	questTarget := int64(questData.Goal.Target)
 	questTemplate := strings.ToLower(questData.TemplateId)
@@ -510,6 +518,7 @@ func (stop *Pokestop) updatePokestopFromQuestProto(questProto *pogo.FortSearchOu
 	}
 
 	if !haveAr {
+		stop.AlternativeQuestSeed = null.StringFrom(strconv.FormatInt(questSeed, 10))
 		stop.AlternativeQuestType = null.IntFrom(questType)
 		stop.AlternativeQuestTarget = null.IntFrom(questTarget)
 		stop.AlternativeQuestTemplate = null.StringFrom(questTemplate)
@@ -519,6 +528,7 @@ func (stop *Pokestop) updatePokestopFromQuestProto(questProto *pogo.FortSearchOu
 		stop.AlternativeQuestTimestamp = null.IntFrom(questTimestamp)
 		stop.AlternativeQuestExpiry = questExpiry
 	} else {
+		stop.QuestSeed = null.StringFrom(strconv.FormatInt(questSeed, 10))
 		stop.QuestType = null.IntFrom(questType)
 		stop.QuestTarget = null.IntFrom(questTarget)
 		stop.QuestTemplate = null.StringFrom(questTemplate)
@@ -671,6 +681,7 @@ func createPokestopWebhooks(oldStop *Pokestop, stop *Pokestop) {
 					return "Unknown"
 				}
 			}(),
+			"quest_seed":       stop.AlternativeQuestSeed,
 			"type":             stop.AlternativeQuestType,
 			"target":           stop.AlternativeQuestTarget,
 			"template":         stop.AlternativeQuestTemplate,
@@ -697,6 +708,7 @@ func createPokestopWebhooks(oldStop *Pokestop, stop *Pokestop) {
 					return "Unknown"
 				}
 			}(),
+			"quest_seed":       stop.QuestSeed,
 			"type":             stop.QuestType,
 			"target":           stop.QuestTarget,
 			"template":         stop.QuestTemplate,
@@ -767,9 +779,9 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 	if oldPokestop == nil {
 		res, err := db.GeneralDb.NamedExecContext(ctx, `
 			INSERT INTO pokestop (
-				id, lat, lon, name, url, enabled, lure_expire_timestamp, last_modified_timestamp, quest_type,
+				id, lat, lon, name, url, enabled, lure_expire_timestamp, last_modified_timestamp, quest_seed, quest_type,
 				quest_timestamp, quest_target, quest_conditions, quest_rewards, quest_template, quest_title,
-				alternative_quest_type, alternative_quest_timestamp, alternative_quest_target,
+				alternative_quest_seed, alternative_quest_type, alternative_quest_timestamp, alternative_quest_target,
 				alternative_quest_conditions, alternative_quest_rewards, alternative_quest_template,
 				alternative_quest_title, cell_id, lure_id, sponsor_id, partner_id, ar_scan_eligible,
 				power_up_points, power_up_level, power_up_end_timestamp, updated, first_seen_timestamp,
@@ -777,9 +789,9 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 				showcase_pokemon_form_id, showcase_pokemon_type_id, showcase_ranking_standard, showcase_expiry, showcase_rankings
 				)
 				VALUES (
-				:id, :lat, :lon, :name, :url, :enabled, :lure_expire_timestamp, :last_modified_timestamp, :quest_type,
+				:id, :lat, :lon, :name, :url, :enabled, :lure_expire_timestamp, :last_modified_timestamp, :quest_seed, :quest_type,
 				:quest_timestamp, :quest_target, :quest_conditions, :quest_rewards, :quest_template, :quest_title,
-				:alternative_quest_type, :alternative_quest_timestamp, :alternative_quest_target,
+				:alternative_quest_seed, :alternative_quest_type, :alternative_quest_timestamp, :alternative_quest_target,
 				:alternative_quest_conditions, :alternative_quest_rewards, :alternative_quest_template,
 				:alternative_quest_title, :cell_id, :lure_id, :sponsor_id, :partner_id, :ar_scan_eligible,
 				:power_up_points, :power_up_level, :power_up_end_timestamp,
@@ -806,6 +818,7 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 				lure_expire_timestamp = :lure_expire_timestamp,
 				last_modified_timestamp = :last_modified_timestamp,
 				updated = :updated,
+				quest_seed = :quest_seed, 
 				quest_type = :quest_type, 
 				quest_timestamp = :quest_timestamp, 
 				quest_target = :quest_target, 
@@ -813,6 +826,7 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 				quest_rewards = :quest_rewards, 
 				quest_template = :quest_template, 
 				quest_title = :quest_title,
+				alternative_quest_seed = :alternative_quest_seed, 
 				alternative_quest_type = :alternative_quest_type, 
 				alternative_quest_timestamp = :alternative_quest_timestamp,
 				alternative_quest_target = :alternative_quest_target, 
