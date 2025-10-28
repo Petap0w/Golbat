@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ type Gym struct {
 	RaidSpawnTimestamp     null.Int    `db:"raid_spawn_timestamp" json:"raid_spawn_timestamp"`
 	RaidBattleTimestamp    null.Int    `db:"raid_battle_timestamp" json:"raid_battle_timestamp"`
 	Updated                int64       `db:"updated" json:"updated"`
+	RaidSeed               null.String `db:"raid_seed" json:"raid_seed,string"`
 	RaidPokemonId          null.Int    `db:"raid_pokemon_id" json:"raid_pokemon_id"`
 	GuardingPokemonId      null.Int    `db:"guarding_pokemon_id" json:"guarding_pokemon_id"`
 	GuardingPokemonDisplay null.String `db:"guarding_pokemon_display" json:"guarding_pokemon_display"`
@@ -77,6 +79,7 @@ type Gym struct {
 	//`raid_spawn_timestamp` int unsigned DEFAULT NULL,
 	//`raid_battle_timestamp` int unsigned DEFAULT NULL,
 	//`updated` int unsigned NOT NULL,
+	//`raid_seed` varchar(25) DEFAULT NULL,
 	//`raid_pokemon_id` smallint unsigned DEFAULT NULL,
 	//`guarding_pokemon_id` smallint unsigned DEFAULT NULL,
 	//`available_slots` smallint unsigned DEFAULT NULL,
@@ -246,6 +249,7 @@ func (gym *Gym) updateGymFromFort(fortData *pogo.PokemonFortProto, cellId uint64
 	}
 
 	if fortData.RaidInfo != nil {
+		gym.RaidSeed = null.StringFrom(strconv.FormatInt(fortData.RaidInfo.RaidSeed, 10))
 		gym.RaidEndTimestamp = null.IntFrom(int64(fortData.RaidInfo.RaidEndMs) / 1000)
 		gym.RaidSpawnTimestamp = null.IntFrom(int64(fortData.RaidInfo.RaidSpawnMs) / 1000)
 		raidBattleTimestamp := int64(fortData.RaidInfo.RaidBattleMs) / 1000
@@ -442,6 +446,7 @@ func hasChangesGym(old *Gym, new *Gym) bool {
 		old.RaidSpawnTimestamp != new.RaidSpawnTimestamp ||
 		old.RaidBattleTimestamp != new.RaidBattleTimestamp ||
 		old.Updated != new.Updated ||
+		old.RaidSeed != new.RaidSeed ||
 		old.RaidPokemonId != new.RaidPokemonId ||
 		old.GuardingPokemonId != new.GuardingPokemonId ||
 		old.AvailableSlots != new.AvailableSlots ||
@@ -564,6 +569,7 @@ func createGymWebhooks(oldGym *Gym, gym *Gym, areas []geo.AreaName) {
 
 	if gym.RaidSpawnTimestamp.ValueOrZero() > 0 &&
 		(oldGym == nil || oldGym.RaidLevel != gym.RaidLevel ||
+			oldGym.RaidSeed != gym.RaidSeed ||
 			oldGym.RaidPokemonId != gym.RaidPokemonId ||
 			oldGym.RaidSpawnTimestamp != gym.RaidSpawnTimestamp || oldGym.Rsvps != gym.Rsvps) {
 		raidBattleTime := gym.RaidBattleTimestamp.ValueOrZero()
@@ -589,6 +595,7 @@ func createGymWebhooks(oldGym *Gym, gym *Gym, areas []geo.AreaName) {
 				"start":                  gym.RaidBattleTimestamp.ValueOrZero(),
 				"end":                    gym.RaidEndTimestamp.ValueOrZero(),
 				"level":                  gym.RaidLevel.ValueOrZero(),
+				"raid_seed":              gym.RaidSeed.ValueOrZero(),
 				"pokemon_id":             gym.RaidPokemonId.ValueOrZero(),
 				"cp":                     gym.RaidPokemonCp.ValueOrZero(),
 				"gender":                 gym.RaidPokemonGender.ValueOrZero(),
