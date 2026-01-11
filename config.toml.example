@@ -10,13 +10,14 @@ url = "http://{koji_url}/api/v1/geofence/feature-collection/{golbat_project}"
 bearer_token = "secret"
 
 [cleanup]
-pokemon = true          # Keep pokemon table is kept nice and short
-incidents = true        # Remove incidents after expiry
-quests = true           # Remove quests after expiry
-tappables = true        # Remove tappables after expiry
-stats = true            # Enable/Disable stats history
-stats_days = 7          # Remove entries from "pokemon_stats", "pokemon_shiny_stats", "pokemon_iv_stats", "pokemon_hundo_stats", "pokemon_nundo_stats", "invasion_stats", "quest_stats", "raid_stats" after x days
-device_hours = 24       # Remove devices from in memory after not seen for x hours
+pokemon = true                  # Keep pokemon table is kept nice and short
+incidents = true                # Remove incidents after expiry
+quests = true                   # Remove quests after expiry
+tappables = true                # Remove tappables after expiry
+stats = true                    # Enable/Disable stats history
+stats_days = 7                  # Remove entries from "pokemon_stats", "pokemon_shiny_stats", "pokemon_iv_stats", "pokemon_hundo_stats", "pokemon_nundo_stats", "invasion_stats", "quest_stats", "raid_stats" after x days
+device_hours = 24               # Remove devices from in memory after not seen for x hours
+forts_stale_threshold = 3600    # Seconds before a fort is considered stale (default: 1 hour)
 
 [logging]
 debug = false
@@ -46,7 +47,7 @@ include_hundos_under_cap = false
 [[webhooks]]
 url = "http://localhost:4201"
 # types if specified can be...
-# types = ["pokemon", "pokemon_iv", "pokemon_no_iv", "gym", "invasion", "quest", "pokestop", "raid", "weather", "fort_update"]
+# types = ["pokemon", "pokemon_iv", "pokemon_no_iv", "gym", "invasion", "quest", "pokestop", "raid", "weather", "fort_update", "max_battle"]
 # "pokemon" includes both with ivs and without. "pokemon_iv" will only be encountered pokemon. "pokemon_no_iv" may be nearby pokemon that have not been encountered (yet).
 
 #[[webhooks]]
@@ -64,3 +65,7 @@ max_pokemon_distance = 100  # Maximum distance in kilometers for searching pokem
 max_pokemon_results = 3000  # Maximum number of pokemon to return
 extended_timeout = false
 profile_routes = false
+
+[weather]
+proactive_iv_switching = true       # Enable proactive IV switching upon weather changes (default: true)
+proactive_iv_switching_to_db = false # Write proactive IV changes to database (default: false)

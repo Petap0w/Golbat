@@ -191,6 +191,24 @@ func main() {
 	}
 
 	decoder.InitialiseOhbem()
+	if cfg.Weather.ProactiveIVSwitching {
+		decoder.InitProactiveIVSwitchSem()
+
+		// Try to fetch from remote first, fallback to cache, then fallback to bundled file
+		if err := decoder.FetchMasterFileData(); err != nil {
+			if err2 := decoder.LoadMasterFileData(""); err2 != nil {
+				_ = decoder.LoadMasterFileData("pogo/master-latest-rdm.json")
+				log.Errorf("Weather MasterFile fetch failed. Loading from cache failed: %s. Loading from pogo/master-latest-rdm.json instead.", err2)
+			} else {
+				log.Warnf("Weather MasterFile fetch failed, loaded from cache: %s", err)
+			}
+		} else {
+			// Save to cache if successfully fetched
+			_ = decoder.SaveMasterFileData()
+		}
+
+		_ = decoder.WatchMasterFileData()
+	}
 	decoder.LoadStatsGeofences()
 	InitDeviceCache()
 
@@ -232,6 +250,16 @@ func main() {
 
 	if cfg.Cleanup.Stats == true {
 		StartStatsExpiry(db)
+	}
+
+	// init fort tracker for memory-based fort cleanup
+	staleThreshold := cfg.Cleanup.FortsStaleThreshold
+	if staleThreshold <= 0 {
+		staleThreshold = 3600 // def 1 hour
+	}
+	decoder.InitFortTracker(staleThreshold)
+	if err := decoder.LoadFortsFromDB(ctx, dbDetails); err != nil {
+		log.Errorf("failed to load forts into tracker: %s", err)
 	}
 
 	if cfg.TestFortInMemory {
@@ -277,6 +305,7 @@ func main() {
 	apiGroup.GET("/pokemon/available", PokemonAvailable)
 	apiGroup.POST("/pokemon/scan", PokemonScan)
 	apiGroup.POST("/pokemon/v2/scan", PokemonScan2)
+	apiGroup.POST("/pokemon/v3/scan", PokemonScan3)
 	apiGroup.POST("/pokemon/search", PokemonSearch)
 
 	apiGroup.GET("/tappable/id/:tappable_id", GetTappable)
@@ -830,15 +859,37 @@ func decodeGMO(ctx context.Context, protoData *ProtoData, scanParameters decoder
 	var newMapCells []uint64
 	var cellsToBeCleaned []uint64
 
+	// track forts per cell for memory-based cleanup (only if tracker enabled)
+	cellForts := make(map[uint64]*decoder.CellFortsData)
+
+	if len(decodedGmo.MapCell) == 0 {
+		return "Skipping GetMapObjectsOutProto: No map cells found"
+	}
 	for _, mapCell := range decodedGmo.MapCell {
 		if isCellNotEmpty(mapCell) {
 			newMapCells = append(newMapCells, mapCell.S2CellId)
 			if cellContainsForts(mapCell) {
 				cellsToBeCleaned = append(cellsToBeCleaned, mapCell.S2CellId)
+				// initialize cell forts tracking (only if tracker enabled)
+				cellForts[mapCell.S2CellId] = &decoder.CellFortsData{
+					Pokestops: make([]string, 0),
+					Gyms:      make([]string, 0),
+					Timestamp: mapCell.AsOfTimeMs,
+				}
 			}
 		}
 		for _, fort := range mapCell.Fort {
 			newForts = append(newForts, decoder.RawFortData{Cell: mapCell.S2CellId, Data: fort, Timestamp: mapCell.AsOfTimeMs})
+
+			// track fort by type for memory-based cleanup (only if tracker enabled)
+			if cf, ok := cellForts[mapCell.S2CellId]; ok {
+				switch fort.FortType {
+				case pogo.FortType_GYM:
+					cf.Gyms = append(cf.Gyms, fort.FortId)
+				case pogo.FortType_CHECKPOINT:
+					cf.Pokestops = append(cf.Pokestops, fort.FortId)
+				}
+			}
 
 			if fort.ActivePokemon != nil {
 				newMapPokemon = append(newMapPokemon, decoder.RawMapPokemonData{Cell: mapCell.S2CellId, Data: fort.ActivePokemon, Timestamp: mapCell.AsOfTimeMs})
@@ -858,11 +909,21 @@ func decodeGMO(ctx context.Context, protoData *ProtoData, scanParameters decoder
 	if scanParameters.ProcessGyms || scanParameters.ProcessPokestops {
 		decoder.UpdateFortBatch(ctx, dbDetails, scanParameters, newForts)
 	}
+	var weatherUpdates []decoder.WeatherUpdate
 	if scanParameters.ProcessWeather {
-		decoder.UpdateClientWeatherBatch(ctx, dbDetails, decodedGmo.ClientWeather)
+		weatherUpdates = decoder.UpdateClientWeatherBatch(ctx, dbDetails, decodedGmo.ClientWeather, decodedGmo.MapCell[0].AsOfTimeMs)
 	}
 	if scanParameters.ProcessPokemon {
 		decoder.UpdatePokemonBatch(ctx, dbDetails, scanParameters, newWildPokemon, newNearbyPokemon, newMapPokemon, decodedGmo.ClientWeather, protoData.Account)
+		if scanParameters.ProcessWeather && scanParameters.ProactiveIVSwitching {
+			for _, weatherUpdate := range weatherUpdates {
+				go func(weatherUpdate decoder.WeatherUpdate) {
+					decoder.ProactiveIVSwitchSem <- true
+					defer func() { <-decoder.ProactiveIVSwitchSem }()
+					decoder.ProactiveIVSwitch(ctx, dbDetails, weatherUpdate, scanParameters.ProactiveIVSwitchingToDB, decodedGmo.MapCell[0].AsOfTimeMs/1000)
+				}(weatherUpdate)
+			}
+		}
 	}
 	if scanParameters.ProcessStations {
 		decoder.UpdateStationBatch(ctx, dbDetails, scanParameters, newStations)
@@ -870,13 +931,14 @@ func decodeGMO(ctx context.Context, protoData *ProtoData, scanParameters decoder
 
 	if scanParameters.ProcessCells {
 		decoder.UpdateClientMapS2CellBatch(ctx, dbDetails, newMapCells)
-		if scanParameters.ProcessGyms || scanParameters.ProcessPokestops {
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				decoder.ClearRemovedForts(ctx, dbDetails, cellsToBeCleaned)
-			}()
-		}
+	}
+
+	if scanParameters.ProcessGyms || scanParameters.ProcessPokestops {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			decoder.CheckRemovedForts(ctx, dbDetails, cellsToBeCleaned, cellForts)
+		}()
 	}
 
 	newFortsLen := len(newForts)

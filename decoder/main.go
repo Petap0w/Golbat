@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strconv"
-	"sync"
+	"runtime"
 	"time"
 
 	"golbat/intstripedmutex"
@@ -66,7 +65,7 @@ var tappableCache *ttlcache.Cache[uint64, Tappable]
 var weatherCache *ttlcache.Cache[int64, Weather]
 var s2CellCache *ttlcache.Cache[uint64, S2Cell]
 var spawnpointCache *ttlcache.Cache[int64, Spawnpoint]
-var pokemonCache *ttlcache.Cache[uint64, Pokemon]
+var pokemonCache []*ttlcache.Cache[uint64, Pokemon]
 var incidentCache *ttlcache.Cache[string, Incident]
 var playerCache *ttlcache.Cache[string, Player]
 var routeCache *ttlcache.Cache[string, Route]
@@ -76,14 +75,13 @@ var getMapFortsCache *ttlcache.Cache[string, *pogo.GetMapFortsOutProto_FortProto
 var gymStripedMutex = stripedmutex.New(128)
 var pokestopStripedMutex = stripedmutex.New(128)
 var stationStripedMutex = stripedmutex.New(128)
-var tappableStripedMutex = intstripedmutex.New(512)
+var tappableStripedMutex = intstripedmutex.New(563)
 var incidentStripedMutex = stripedmutex.New(128)
-var pokemonStripedMutex = intstripedmutex.New(1024)
-var weatherStripedMutex = intstripedmutex.New(128)
-var s2cellStripedMutex = stripedmutex.New(1024)
+var pokemonStripedMutex = intstripedmutex.New(1103)
+var weatherStripedMutex = intstripedmutex.New(157)
 var routeStripedMutex = stripedmutex.New(128)
 
-var s2CellLookup = sync.Map{}
+var ProactiveIVSwitchSem chan bool
 
 var ohbem *gohbem.Ohbem
 
@@ -92,10 +90,30 @@ func init() {
 	initLiveStats()
 }
 
+func InitProactiveIVSwitchSem() {
+	ProactiveIVSwitchSem = make(chan bool, config.Config.MaxConcurrentProactiveIVSwitch)
+}
+
 type gohbemLogger struct{}
 
 func (cl *gohbemLogger) Print(message string) {
 	log.Info("Gohbem - ", message)
+}
+
+func getPokemonCache(key uint64) *ttlcache.Cache[uint64, Pokemon] {
+	return pokemonCache[key%uint64(len(pokemonCache))]
+}
+
+func setPokemonCache(key uint64, value Pokemon, ttl time.Duration) {
+	getPokemonCache(key).Set(key, value, ttl)
+}
+
+func getPokemonFromCache(key uint64) *ttlcache.Item[uint64, Pokemon] {
+	return getPokemonCache(key).Get(key)
+}
+
+func deletePokemonFromCache(key uint64) {
+	getPokemonCache(key).Delete(key)
 }
 
 func initDataCache() {
@@ -134,11 +152,16 @@ func initDataCache() {
 	)
 	go spawnpointCache.Start()
 
-	pokemonCache = ttlcache.New[uint64, Pokemon](
-		ttlcache.WithTTL[uint64, Pokemon](60*time.Minute),
-		ttlcache.WithDisableTouchOnHit[uint64, Pokemon](), // Pokemon will last 60 mins from when we first see them not last see them
-	)
-	go pokemonCache.Start()
+	// pokemon is the most active table. Use an array of caches to increase concurrency for querying ttlcache, which places a global lock for each Get/Set operation
+	// Initialize pokemon cache array: by picking it to be nproc, we should expect ~nproc*(1-1/e) ~ 63% concurrency
+	pokemonCache = make([]*ttlcache.Cache[uint64, Pokemon], runtime.NumCPU())
+	for i := 0; i < len(pokemonCache); i++ {
+		pokemonCache[i] = ttlcache.New[uint64, Pokemon](
+			ttlcache.WithTTL[uint64, Pokemon](60*time.Minute),
+			ttlcache.WithDisableTouchOnHit[uint64, Pokemon](), // Pokemon will last 60 mins from when we first see them not last see them
+		)
+		go pokemonCache[i].Start()
+	}
 	initPokemonRtree()
 	initFortRtree()
 
@@ -268,10 +291,20 @@ func UpdateFortBatch(ctx context.Context, db db.DbDetails, scanParameters ScanPa
 				continue
 			}
 
-			if pokestop == nil {
+			isNewPokestop := pokestop == nil
+			if isNewPokestop {
 				pokestop = &Pokestop{}
 			}
 			pokestop.updatePokestopFromFort(fort.Data, fort.Cell, fort.Timestamp/1000)
+
+			// If this is a new pokestop, check if it was converted from a gym and copy shared fields
+			if isNewPokestop {
+				gym, _ := GetGymRecord(ctx, db, fortId)
+				if gym != nil {
+					copySharedFieldsFromGym(pokestop, gym)
+				}
+			}
+
 			savePokestopRecord(ctx, db, pokestop)
 
 			incidents := fort.Data.PokestopDisplays
@@ -315,11 +348,21 @@ func UpdateFortBatch(ctx context.Context, db db.DbDetails, scanParameters ScanPa
 				continue
 			}
 
-			if gym == nil {
+			isNewGym := gym == nil
+			if isNewGym {
 				gym = &Gym{}
 			}
 
 			gym.updateGymFromFort(fort.Data, fort.Cell)
+
+			// If this is a new gym, check if it was converted from a pokestop and copy shared fields
+			if isNewGym {
+				pokestop, _ := GetPokestopRecord(ctx, db, fortId)
+				if pokestop != nil {
+					copySharedFieldsFromPokestop(gym, pokestop)
+				}
+			}
+
 			saveGymRecord(ctx, db, gym)
 			gymMutex.Unlock()
 		}
@@ -383,7 +426,7 @@ func UpdatePokemonBatch(ctx context.Context, db db.DbDetails, scanParameters Sca
 								log.Debugf("DELAYED UPDATE: Updating pokemon %d from wild", encounterId)
 
 								pokemon.updateFromWild(ctx, db, wildPokemon, cellId, weatherLookup, timestampMs, username)
-								savePokemonRecordAsAtTime(ctx, db, pokemon, false, updateTime)
+								savePokemonRecordAsAtTime(ctx, db, pokemon, false, true, true, updateTime)
 							}
 						}
 					}(wild.Data, int64(wild.Cell), wild.Timestamp)
@@ -404,7 +447,7 @@ func UpdatePokemonBatch(ctx context.Context, db db.DbDetails, scanParameters Sca
 				log.Printf("getOrCreatePokemonRecord: %s", err)
 			} else {
 				pokemon.updateFromNearby(ctx, db, nearby.Data, int64(nearby.Cell), weatherLookup, nearby.Timestamp, username)
-				savePokemonRecordAsAtTime(ctx, db, pokemon, false, nearby.Timestamp/1000)
+				savePokemonRecordAsAtTime(ctx, db, pokemon, false, true, true, nearby.Timestamp/1000)
 			}
 
 			pokemonMutex.Unlock()
@@ -428,13 +471,13 @@ func UpdatePokemonBatch(ctx context.Context, db db.DbDetails, scanParameters Sca
 				pokemon.updatePokemonFromDiskEncounterProto(ctx, db, diskEncounter, username)
 				//log.Infof("Processed stored disk encounter")
 			}
-			savePokemonRecordAsAtTime(ctx, db, pokemon, false, mapPokemon.Timestamp/1000)
+			savePokemonRecordAsAtTime(ctx, db, pokemon, false, true, true, mapPokemon.Timestamp/1000)
 		}
 		pokemonMutex.Unlock()
 	}
 }
 
-func UpdateClientWeatherBatch(ctx context.Context, db db.DbDetails, p []*pogo.ClientWeatherProto) {
+func UpdateClientWeatherBatch(ctx context.Context, db db.DbDetails, p []*pogo.ClientWeatherProto, timestampMs int64) (updates []WeatherUpdate) {
 	for _, weatherProto := range p {
 		weatherMutex, _ := weatherStripedMutex.GetLock(uint64(weatherProto.S2CellId))
 		weatherMutex.Lock()
@@ -445,105 +488,25 @@ func UpdateClientWeatherBatch(ctx context.Context, db db.DbDetails, p []*pogo.Cl
 			if weather == nil {
 				weather = &Weather{}
 			}
-			weather.updateWeatherFromClientWeatherProto(weatherProto)
-			saveWeatherRecord(ctx, db, weather)
+			if timestampMs >= weather.UpdatedMs {
+				weather.UpdatedMs = timestampMs
+				oldWeather := weather.updateWeatherFromClientWeatherProto(weatherProto)
+				saveWeatherRecord(ctx, db, weather)
+				if oldWeather != weather.GameplayCondition {
+					updates = append(updates, WeatherUpdate{
+						S2CellId:   weatherProto.S2CellId,
+						NewWeather: int32(weatherProto.GameplayWeather.GameplayCondition),
+					})
+				}
+			}
 		}
 		weatherMutex.Unlock()
 	}
+	return updates
 }
 
 func UpdateClientMapS2CellBatch(ctx context.Context, db db.DbDetails, cellIds []uint64) {
 	saveS2CellRecords(ctx, db, cellIds)
-}
-
-func ClearRemovedForts(ctx context.Context, dbDetails db.DbDetails, mapCells []uint64) {
-	now := time.Now().Unix()
-	// check gyms in cell
-	for _, cellId := range mapCells {
-		// lookup for last check
-		if shouldSkipCellCheck(cellId, now) {
-			continue
-		}
-
-		// time to check again
-		s2cellMutex, _ := s2cellStripedMutex.GetLock(strconv.FormatUint(cellId, 10))
-		s2cellMutex.Lock()
-
-		if shouldSkipCellCheck(cellId, now) {
-			// if another GMO processed that cell already, then skip
-			s2cellMutex.Unlock()
-			continue
-		}
-
-		var gymsDone = false
-		gymIds, errGyms := db.FindOldGyms(ctx, dbDetails, int64(cellId))
-		if errGyms != nil {
-			log.Errorf("ClearRemovedForts - Unable to clear old gyms: %s", errGyms)
-		} else {
-			if gymIds == nil {
-				// if there is no gym to clear we are done with gyms
-				gymsDone = true
-			} else {
-				// we need to clear removed gyms (not seen for 60 minutes)
-				errGyms2 := db.ClearOldGyms(ctx, dbDetails, gymIds)
-				if errGyms2 != nil {
-					log.Errorf("ClearRemovedForts - Unable to clear old gyms '%v': %s", gymIds, errGyms2)
-				} else {
-					// if there are all gyms cleared we are done with gyms
-					gymsDone = true
-					for _, gymId := range gymIds {
-						gymCache.Delete(gymId)
-					}
-					log.Infof("ClearRemovedForts - Cleared old Gym(s) in cell %d: %v", cellId, gymIds)
-					CreateFortWebhooks(ctx, dbDetails, gymIds, GYM, REMOVAL)
-				}
-			}
-		}
-		var stopsDone = false
-		stopIds, stopsErr := db.FindOldPokestops(ctx, dbDetails, int64(cellId))
-		if stopsErr != nil {
-			log.Errorf("ClearRemovedForts - Unable to clear old stops: %s", stopsErr)
-		} else {
-			if stopIds == nil {
-				// iff there is no stop to clear we update stops
-				stopsDone = true
-			} else {
-				// we need to clear removed stops (not seen for 60 minutes)
-				stopsErr2 := db.ClearOldPokestops(ctx, dbDetails, stopIds)
-				if stopsErr2 != nil {
-					log.Errorf("ClearRemovedForts - Unable to clear old stops '%v': %s", stopIds, stopsErr2)
-				} else {
-					// if there are all gyms cleared we are done with gyms
-					stopsDone = true
-					for _, stopId := range stopIds {
-						pokestopCache.Delete(stopId)
-					}
-					log.Infof("ClearRemovedForts - Cleared old Stop(s) in cell %d: %v", cellId, stopIds)
-					CreateFortWebhooks(ctx, dbDetails, stopIds, POKESTOP, REMOVAL)
-				}
-			}
-		}
-
-		if gymsDone && stopsDone {
-			s2CellLookup.Store(cellId, now)
-		}
-		s2cellMutex.Unlock()
-	}
-}
-
-func shouldSkipCellCheck(cellId uint64, now int64) bool {
-	cachedCell, ok := s2CellLookup.Load(cellId)
-	var timestamp int64
-	if ok {
-		timestamp = cachedCell.(int64)
-	} else {
-		s2CellLookup.Store(cellId, now-2000) // add it with timestamp in the past, because we need to check twice
-		return false
-	}
-	if timestamp > now-1800 {
-		return true
-	}
-	return false
 }
 
 func UpdateIncidentLineup(ctx context.Context, db db.DbDetails, protoReq *pogo.OpenInvasionCombatSessionProto, protoRes *pogo.OpenInvasionCombatSessionOutProto) string {
