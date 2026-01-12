@@ -271,41 +271,75 @@ func nullFloatAlmostEqual(a, b null.Float, tolerance float64) bool {
 }
 
 func UpdateFortBatch(ctx context.Context, db db.DbDetails, scanParameters ScanParameters, p []RawFortData) {
-	// Logic is:
-	// 1. Filter out pokestops that are unchanged (last modified time)
-	// 2. Fetch current stops from database
-	// 3. Generate batch of inserts as needed (with on duplicate saveGymRecord)
+	// Optimized batch processing:
+	// 1. Collect all fort IDs by type
+	// 2. Batch fetch existing forts from database in single query
+	// 3. Process each fort with mutex protection using cached data
 
-	//var stopsToModify []string
+	if len(p) == 0 {
+		return
+	}
+
+	// Separate fort IDs by type for batch fetching
+	var pokestopIds []string
+	var gymIds []string
 
 	for _, fort := range p {
+		if fort.Data.FortType == pogo.FortType_CHECKPOINT && scanParameters.ProcessPokestops {
+			pokestopIds = append(pokestopIds, fort.Data.FortId)
+		} else if fort.Data.FortType == pogo.FortType_GYM && scanParameters.ProcessGyms {
+			gymIds = append(gymIds, fort.Data.FortId)
+		}
+	}
+
+	// Batch fetch pokestops and gyms
+	pokestopMap, err := GetPokestopRecordsBatch(ctx, db, pokestopIds)
+	if err != nil {
+		log.Errorf("GetPokestopRecordsBatch: %s", err)
+		// Fall back to empty map to continue processing
+		pokestopMap = make(map[string]*Pokestop)
+	}
+
+	gymMap, err := GetGymRecordsBatch(ctx, db, gymIds)
+	if err != nil {
+		log.Errorf("GetGymRecordsBatch: %s", err)
+		// Fall back to empty map to continue processing
+		gymMap = make(map[string]*Gym)
+	}
+
+	// Process each fort with mutex protection
+	for _, fort := range p {
 		fortId := fort.Data.FortId
+		
 		if fort.Data.FortType == pogo.FortType_CHECKPOINT && scanParameters.ProcessPokestops {
 			pokestopMutex, _ := pokestopStripedMutex.GetLock(fortId)
 
 			pokestopMutex.Lock()
-			pokestop, err := GetPokestopRecord(ctx, db, fortId) // should check error
-			if err != nil {
-				log.Errorf("getPokestopRecord: %s", err)
-				pokestopMutex.Unlock()
-				continue
-			}
-
-			isNewPokestop := pokestop == nil
+			
+			// Get pokestop from batch-fetched map
+			oldPokestop := pokestopMap[fortId]
+			isNewPokestop := oldPokestop == nil
+			
+			var pokestop *Pokestop
 			if isNewPokestop {
 				pokestop = &Pokestop{}
+			} else {
+				// Create a copy to avoid modifying cached data
+				pokestopCopy := *oldPokestop
+				pokestop = &pokestopCopy
 			}
+			
 			pokestop.updatePokestopFromFort(fort.Data, fort.Cell, fort.Timestamp/1000)
 
 			// If this is a new pokestop, check if it was converted from a gym and copy shared fields
 			if isNewPokestop {
-				gym, _ := GetGymRecord(ctx, db, fortId)
+				gym := gymMap[fortId]
 				if gym != nil {
 					copySharedFieldsFromGym(pokestop, gym)
 				}
 			}
 
-			savePokestopRecord(ctx, db, pokestop)
+			savePokestopRecordWithOld(ctx, db, pokestop, oldPokestop)
 
 			incidents := fort.Data.PokestopDisplays
 			if incidents == nil && fort.Data.PokestopDisplay != nil {
@@ -341,29 +375,31 @@ func UpdateFortBatch(ctx context.Context, db db.DbDetails, scanParameters ScanPa
 			gymMutex, _ := gymStripedMutex.GetLock(fortId)
 
 			gymMutex.Lock()
-			gym, err := GetGymRecord(ctx, db, fortId)
-			if err != nil {
-				log.Errorf("GetGymRecord: %s", err)
-				gymMutex.Unlock()
-				continue
-			}
-
-			isNewGym := gym == nil
+			
+			// Get gym from batch-fetched map
+			oldGym := gymMap[fortId]
+			isNewGym := oldGym == nil
+			
+			var gym *Gym
 			if isNewGym {
 				gym = &Gym{}
+			} else {
+				// Create a copy to avoid modifying cached data
+				gymCopy := *oldGym
+				gym = &gymCopy
 			}
 
 			gym.updateGymFromFort(fort.Data, fort.Cell)
 
 			// If this is a new gym, check if it was converted from a pokestop and copy shared fields
 			if isNewGym {
-				pokestop, _ := GetPokestopRecord(ctx, db, fortId)
+				pokestop := pokestopMap[fortId]
 				if pokestop != nil {
 					copySharedFieldsFromPokestop(gym, pokestop)
 				}
 			}
 
-			saveGymRecord(ctx, db, gym)
+			saveGymRecordWithOld(ctx, db, gym, oldGym)
 			gymMutex.Unlock()
 		}
 	}

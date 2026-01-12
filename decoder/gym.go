@@ -14,6 +14,7 @@ import (
 	"golbat/geo"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/jmoiron/sqlx"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v4"
 
@@ -141,6 +142,71 @@ func GetGymRecord(ctx context.Context, db db.DbDetails, fortId string) (*Gym, er
 		fortRtreeUpdateGymOnGet(&gym)
 	}
 	return &gym, nil
+}
+
+// GetGymRecordsBatch fetches multiple gyms in a single query for cache misses
+// Returns a map of fortId -> Gym for easy lookup
+func GetGymRecordsBatch(ctx context.Context, db db.DbDetails, fortIds []string) (map[string]*Gym, error) {
+	if len(fortIds) == 0 {
+		return make(map[string]*Gym), nil
+	}
+
+	result := make(map[string]*Gym, len(fortIds))
+	idsToFetch := make([]string, 0, len(fortIds))
+
+	// First check cache for all IDs
+	for _, fortId := range fortIds {
+		inMemoryGym := gymCache.Get(fortId)
+		if inMemoryGym != nil {
+			gym := inMemoryGym.Value()
+			result[fortId] = &gym
+		} else {
+			idsToFetch = append(idsToFetch, fortId)
+		}
+	}
+
+	// If all were in cache, return early
+	if len(idsToFetch) == 0 {
+		return result, nil
+	}
+
+	// Batch fetch the cache misses
+	query, args, err := sqlx.In(`SELECT id, lat, lon, name, url, last_modified_timestamp, raid_end_timestamp, 
+		raid_spawn_timestamp, raid_battle_timestamp, updated, raid_pokemon_id, guarding_pokemon_id, 
+		guarding_pokemon_display, available_slots, team_id, raid_level, enabled, ex_raid_eligible, in_battle, 
+		raid_pokemon_move_1, raid_pokemon_move_2, raid_pokemon_form, raid_pokemon_alignment, raid_pokemon_cp, 
+		raid_is_exclusive, cell_id, deleted, total_cp, first_seen_timestamp, raid_pokemon_gender, sponsor_id, 
+		partner_id, raid_pokemon_costume, raid_pokemon_evolution, ar_scan_eligible, power_up_level, 
+		power_up_points, power_up_end_timestamp, description, defenders, rsvps 
+		FROM gym WHERE id IN (?)`, idsToFetch)
+
+	if err != nil {
+		statsCollector.IncDbQuery("select gym batch", err)
+		return result, err
+	}
+
+	var gyms []Gym
+	err = db.GeneralDb.SelectContext(ctx, &gyms, db.GeneralDb.Rebind(query), args...)
+	statsCollector.IncDbQuery("select gym batch", err)
+
+	if err != nil {
+		return result, err
+	}
+
+	// Cache and add to result map
+	for i := range gyms {
+		gym := &gyms[i]
+		result[gym.Id] = gym
+		gymCache.Set(gym.Id, *gym, ttlcache.DefaultTTL)
+		if config.Config.TestFortInMemory {
+			fortRtreeUpdateGymOnGet(gym)
+		}
+	}
+
+	log.Debugf("GetGymRecordsBatch: fetched %d from cache, %d from DB (%d found)",
+		len(fortIds)-len(idsToFetch), len(idsToFetch), len(gyms))
+
+	return result, nil
 }
 
 func escapeLike(s string) string {
@@ -633,7 +699,14 @@ func createGymWebhooks(oldGym *Gym, gym *Gym, areas []geo.AreaName) {
 }
 
 func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
-	oldGym, _ := GetGymRecord(ctx, db, gym.Id)
+	saveGymRecordWithOld(ctx, db, gym, nil)
+}
+
+func saveGymRecordWithOld(ctx context.Context, db db.DbDetails, gym *Gym, oldGym *Gym) {
+	// If oldGym not provided, fetch it (for backward compatibility)
+	if oldGym == nil {
+		oldGym, _ = GetGymRecord(ctx, db, gym.Id)
+	}
 
 	now := time.Now().Unix()
 	if oldGym != nil && !hasChangesGym(oldGym, gym) {

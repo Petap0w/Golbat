@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/jmoiron/sqlx"
 	"github.com/paulmach/orb/geojson"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v4"
@@ -148,6 +149,73 @@ func GetPokestopRecord(ctx context.Context, db db.DbDetails, fortId string) (*Po
 		fortRtreeUpdatePokestopOnGet(&pokestop)
 	}
 	return &pokestop, nil
+}
+
+// GetPokestopRecordsBatch fetches multiple pokestops in a single query for cache misses
+// Returns a map of fortId -> Pokestop for easy lookup
+func GetPokestopRecordsBatch(ctx context.Context, db db.DbDetails, fortIds []string) (map[string]*Pokestop, error) {
+	if len(fortIds) == 0 {
+		return make(map[string]*Pokestop), nil
+	}
+
+	result := make(map[string]*Pokestop, len(fortIds))
+	idsToFetch := make([]string, 0, len(fortIds))
+
+	// First check cache for all IDs
+	for _, fortId := range fortIds {
+		stop := pokestopCache.Get(fortId)
+		if stop != nil {
+			pokestop := stop.Value()
+			result[fortId] = &pokestop
+		} else {
+			idsToFetch = append(idsToFetch, fortId)
+		}
+	}
+
+	// If all were in cache, return early
+	if len(idsToFetch) == 0 {
+		return result, nil
+	}
+
+	// Batch fetch the cache misses
+	query, args, err := sqlx.In(`SELECT id, lat, lon, name, url, enabled, lure_expire_timestamp, last_modified_timestamp,
+		updated, quest_type, quest_timestamp, quest_target, quest_conditions,
+		quest_rewards, quest_template, quest_title,
+		alternative_quest_type, alternative_quest_timestamp, alternative_quest_target,
+		alternative_quest_conditions, alternative_quest_rewards,
+		alternative_quest_template, alternative_quest_title, cell_id, deleted, lure_id, sponsor_id, partner_id,
+		ar_scan_eligible, power_up_points, power_up_level, power_up_end_timestamp,
+		quest_expiry, alternative_quest_expiry, description, showcase_pokemon_id, showcase_pokemon_form_id,
+		showcase_pokemon_type_id, showcase_ranking_standard, showcase_expiry, showcase_rankings
+		FROM pokestop WHERE id IN (?)`, idsToFetch)
+
+	if err != nil {
+		statsCollector.IncDbQuery("select pokestop batch", err)
+		return result, err
+	}
+
+	var pokestops []Pokestop
+	err = db.GeneralDb.SelectContext(ctx, &pokestops, db.GeneralDb.Rebind(query), args...)
+	statsCollector.IncDbQuery("select pokestop batch", err)
+
+	if err != nil {
+		return result, err
+	}
+
+	// Cache and add to result map
+	for i := range pokestops {
+		pokestop := &pokestops[i]
+		result[pokestop.Id] = pokestop
+		pokestopCache.Set(pokestop.Id, *pokestop, ttlcache.DefaultTTL)
+		if config.Config.TestFortInMemory {
+			fortRtreeUpdatePokestopOnGet(pokestop)
+		}
+	}
+
+	log.Debugf("GetPokestopRecordsBatch: fetched %d from cache, %d from DB (%d found)",
+		len(fortIds)-len(idsToFetch), len(idsToFetch), len(pokestops))
+
+	return result, nil
 }
 
 // hasChangesPokestop compares two Pokestop structs
@@ -768,7 +836,15 @@ func createPokestopWebhooks(oldStop *Pokestop, stop *Pokestop) {
 }
 
 func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop) {
-	oldPokestop, _ := GetPokestopRecord(ctx, db, pokestop.Id)
+	savePokestopRecordWithOld(ctx, db, pokestop, nil)
+}
+
+func savePokestopRecordWithOld(ctx context.Context, db db.DbDetails, pokestop *Pokestop, oldPokestop *Pokestop) {
+	// If oldPokestop not provided, fetch it (for backward compatibility)
+	if oldPokestop == nil {
+		oldPokestop, _ = GetPokestopRecord(ctx, db, pokestop.Id)
+	}
+
 	now := time.Now().Unix()
 	if oldPokestop != nil && !hasChangesPokestop(oldPokestop, pokestop) {
 		if oldPokestop.Updated > now-900 {
