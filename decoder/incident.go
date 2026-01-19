@@ -101,47 +101,23 @@ func saveIncidentRecord(ctx context.Context, db db.DbDetails, incident *Incident
 		return
 	}
 
-	//log.Traceln(cmp.Diff(oldIncident, incident))
-
 	incident.Updated = time.Now().Unix()
 
-	//log.Println(cmp.Diff(oldIncident, incident))
+	// Update L1 cache immediately for read consistency
+	incidentCache.Set(incident.Id, *incident, ttlcache.DefaultTTL)
 
-	if oldIncident == nil {
-		res, err := db.GeneralDb.NamedExec("INSERT INTO incident (id, pokestop_id, start, expiration, display_type, style, `character`, updated, confirmed, slot_1_pokemon_id, slot_1_form, slot_2_pokemon_id, slot_2_form, slot_3_pokemon_id, slot_3_form) "+
-			"VALUES (:id, :pokestop_id, :start, :expiration, :display_type, :style, :character, :updated, :confirmed, :slot_1_pokemon_id, :slot_1_form, :slot_2_pokemon_id, :slot_2_form, :slot_3_pokemon_id, :slot_3_form)", incident)
-
-		if err != nil {
-			log.Errorf("insert incident: %s", err)
-			return
+	// Queue write to database
+	if redisEnabled {
+		if err := queueWrite(ctx, "incident", "upsert", incident); err != nil {
+			log.Warnf("Failed to queue incident write for %s: %s", incident.Id, err)
+			// Fall back to direct DB write
+			saveIncidentRecordDirect(ctx, db, incident)
 		}
-		statsCollector.IncDbQuery("insert incident", err)
-		_, _ = res, err
 	} else {
-		res, err := db.GeneralDb.NamedExec("UPDATE incident SET "+
-			"start = :start, "+
-			"expiration = :expiration, "+
-			"display_type = :display_type, "+
-			"style = :style, "+
-			"`character` = :character, "+
-			"updated = :updated, "+
-			"confirmed = :confirmed, "+
-			"slot_1_pokemon_id = :slot_1_pokemon_id, "+
-			"slot_1_form = :slot_1_form, "+
-			"slot_2_pokemon_id = :slot_2_pokemon_id, "+
-			"slot_2_form = :slot_2_form, "+
-			"slot_3_pokemon_id = :slot_3_pokemon_id, "+
-			"slot_3_form = :slot_3_form "+
-			"WHERE id = :id", incident,
-		)
-		statsCollector.IncDbQuery("update incident", err)
-		if err != nil {
-			log.Errorf("Update incident %s", err)
-		}
-		_, _ = res, err
+		// Direct DB write if Redis not enabled
+		saveIncidentRecordDirect(ctx, db, incident)
 	}
 
-	incidentCache.Set(incident.Id, *incident, ttlcache.DefaultTTL)
 	createIncidentWebhooks(ctx, db, oldIncident, incident)
 
 	stop, _ := GetPokestopRecord(ctx, db, incident.PokestopId)
@@ -151,6 +127,36 @@ func saveIncidentRecord(ctx context.Context, db db.DbDetails, incident *Incident
 
 	areas := MatchStatsGeofence(stop.Lat, stop.Lon)
 	updateIncidentStats(oldIncident, incident, areas)
+}
+
+// saveIncidentRecordDirect writes directly to DB (fallback or no-Redis mode)
+func saveIncidentRecordDirect(ctx context.Context, db db.DbDetails, incident *Incident) {
+	res, err := db.GeneralDb.NamedExecContext(ctx,
+		`INSERT INTO incident (id, pokestop_id, start, expiration, display_type, style, `+"`character`"+`, updated, confirmed, 
+			slot_1_pokemon_id, slot_1_form, slot_2_pokemon_id, slot_2_form, slot_3_pokemon_id, slot_3_form) 
+		VALUES (:id, :pokestop_id, :start, :expiration, :display_type, :style, :character, :updated, :confirmed, 
+			:slot_1_pokemon_id, :slot_1_form, :slot_2_pokemon_id, :slot_2_form, :slot_3_pokemon_id, :slot_3_form)
+		ON DUPLICATE KEY UPDATE
+			start = VALUES(start),
+			expiration = VALUES(expiration),
+			display_type = VALUES(display_type),
+			style = VALUES(style),
+			`+"`character`"+` = VALUES(`+"`character`"+`),
+			updated = VALUES(updated),
+			confirmed = VALUES(confirmed),
+			slot_1_pokemon_id = VALUES(slot_1_pokemon_id),
+			slot_1_form = VALUES(slot_1_form),
+			slot_2_pokemon_id = VALUES(slot_2_pokemon_id),
+			slot_2_form = VALUES(slot_2_form),
+			slot_3_pokemon_id = VALUES(slot_3_pokemon_id),
+			slot_3_form = VALUES(slot_3_form)`,
+		incident)
+
+	statsCollector.IncDbQuery("upsert incident", err)
+	if err != nil {
+		log.Errorf("upsert incident %s: %s", incident.Id, err)
+	}
+	_ = res
 }
 
 func createIncidentWebhooks(ctx context.Context, db db.DbDetails, oldIncident *Incident, incident *Incident) {

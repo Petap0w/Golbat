@@ -1,6 +1,7 @@
 package decoder
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -93,76 +94,75 @@ func saveRouteRecord(db db.DbDetails, route *Route) error {
 
 	if oldRoute != nil && !hasChangesRoute(oldRoute, route) {
 		if oldRoute.Updated > time.Now().Unix()-900 {
-			// if a route is unchanged, but we did see it again after 15 minutes, then save again
 			return nil
 		}
 	}
 
-	if oldRoute == nil {
-		_, err := db.GeneralDb.NamedExec(
-			`
-			INSERT INTO route (
-			  id, name, shortcode, description, distance_meters,
-			  duration_seconds, end_fort_id, end_image,
-			  end_lat, end_lon, image, image_border_color, 
-			  reversible, start_fort_id, start_image, 
-			  start_lat, start_lon, tags, type, 
-			  updated, version, waypoints
-			)
-			VALUES
-			  (
-				:id, :name, :shortcode, :description, :distance_meters,
-				:duration_seconds, :end_fort_id,
-				:end_image, :end_lat, :end_lon, :image, 
-				:image_border_color, :reversible, 
-				:start_fort_id, :start_image, :start_lat, 
-				:start_lon, :tags, :type, :updated, 
-				:version, :waypoints
-			  )
-			`,
-			route,
-		)
+	// Update L1 cache immediately
+	routeCache.Set(route.Id, *route, ttlcache.DefaultTTL)
 
-		statsCollector.IncDbQuery("insert route", err)
-		if err != nil {
-			return fmt.Errorf("insert route error: %w", err)
+	// Queue write to database
+	ctx := context.TODO()
+	if redisEnabled {
+		if err := queueWrite(ctx, "route", "upsert", route); err != nil {
+			log.Warnf("Failed to queue route write for %s: %s", route.Id, err)
+			return saveRouteRecordDirect(db, route)
 		}
 	} else {
-		_, err := db.GeneralDb.NamedExec(
-			`
-			UPDATE route SET
-				name = :name,
-				shortcode = :shortcode,
-				description = :description,
-				distance_meters = :distance_meters,
-				duration_seconds = :duration_seconds,
-				end_fort_id = :end_fort_id,
-				end_image = :end_image,
-				end_lat = :end_lat,
-				end_lon = :end_lon,
-				image = :image,
-				image_border_color = :image_border_color,
-				reversible = :reversible,
-				start_fort_id = :start_fort_id,
-				start_image = :start_image,
-				start_lat = :start_lat,
-				start_lon = :start_lon,
-				tags = :tags,
-				type = :type,
-				updated = :updated,
-				version = :version,
-				waypoints = :waypoints
-			WHERE id = :id`,
-			route,
-		)
-
-		statsCollector.IncDbQuery("update route", err)
-		if err != nil {
-			return fmt.Errorf("update route error %w", err)
-		}
+		return saveRouteRecordDirect(db, route)
 	}
 
-	routeCache.Set(route.Id, *route, ttlcache.DefaultTTL)
+	return nil
+}
+
+// saveRouteRecordDirect writes directly to DB (fallback or no-Redis mode)
+func saveRouteRecordDirect(db db.DbDetails, route *Route) error {
+	_, err := db.GeneralDb.NamedExec(
+		`INSERT INTO route (
+			id, name, shortcode, description, distance_meters,
+			duration_seconds, end_fort_id, end_image,
+			end_lat, end_lon, image, image_border_color, 
+			reversible, start_fort_id, start_image, 
+			start_lat, start_lon, tags, type, 
+			updated, version, waypoints
+		)
+		VALUES (
+			:id, :name, :shortcode, :description, :distance_meters,
+			:duration_seconds, :end_fort_id,
+			:end_image, :end_lat, :end_lon, :image, 
+			:image_border_color, :reversible, 
+			:start_fort_id, :start_image, :start_lat, 
+			:start_lon, :tags, :type, :updated, 
+			:version, :waypoints
+		)
+		ON DUPLICATE KEY UPDATE
+			name = VALUES(name),
+			shortcode = VALUES(shortcode),
+			description = VALUES(description),
+			distance_meters = VALUES(distance_meters),
+			duration_seconds = VALUES(duration_seconds),
+			end_fort_id = VALUES(end_fort_id),
+			end_image = VALUES(end_image),
+			end_lat = VALUES(end_lat),
+			end_lon = VALUES(end_lon),
+			image = VALUES(image),
+			image_border_color = VALUES(image_border_color),
+			reversible = VALUES(reversible),
+			start_fort_id = VALUES(start_fort_id),
+			start_image = VALUES(start_image),
+			start_lat = VALUES(start_lat),
+			start_lon = VALUES(start_lon),
+			tags = VALUES(tags),
+			type = VALUES(type),
+			updated = VALUES(updated),
+			version = VALUES(version),
+			waypoints = VALUES(waypoints)`,
+		route)
+
+	statsCollector.IncDbQuery("upsert route", err)
+	if err != nil {
+		return fmt.Errorf("upsert route error: %w", err)
+	}
 	return nil
 }
 

@@ -209,11 +209,11 @@ func retryOnDeadlock(ctx context.Context, maxRetries int, fn func() error) error
 		if err == nil {
 			return nil
 		}
-		
+
 		if !isDeadlock(err) {
 			return err
 		}
-		
+
 		// Exponential backoff on deadlock
 		if i < maxRetries-1 {
 			backoff := time.Duration(10*(i+1)) * time.Millisecond
@@ -231,38 +231,38 @@ func (w *DBWriter) processPokestops(ctx context.Context, ops []OperationData) ([
 		return nil, nil
 	}
 
-	// Deserialize and batch write
-	var pokestops []*decoder.Pokestop
+	// Process each item individually to handle partial failures
+	var successfulIds []string
+	successCount := 0
+
 	for _, opData := range ops {
 		var pokestop decoder.Pokestop
 		if err := msgpack.Unmarshal(opData.Operation.Data, &pokestop); err != nil {
 			log.Errorf("Failed to unmarshal pokestop: %s", err)
+			// Don't ACK this message - it will be retried
 			continue
 		}
-		pokestops = append(pokestops, &pokestop)
+
+		// Try to upsert with retry on deadlock
+		err := retryOnDeadlock(ctx, 3, func() error {
+			return db.BatchUpsertPokestops(ctx, w.db, []*decoder.Pokestop{&pokestop})
+		})
+
+		if err == nil {
+			// Success - ACK this message
+			successfulIds = append(successfulIds, opData.MessageID)
+			successCount++
+		} else {
+			// Failed - don't ACK, will be retried
+			log.Debugf("Failed to upsert pokestop %s: %s", pokestop.Id, err)
+		}
 	}
 
-	if len(pokestops) == 0 {
-		return nil, nil
+	if successCount > 0 {
+		log.Infof("Processed batch of %d pokestops (%d successful, %d failed)", len(ops), successCount, len(ops)-successCount)
 	}
 
-	// Use batch insert with retry on deadlock
-	err := retryOnDeadlock(ctx, 3, func() error {
-		return db.BatchUpsertPokestops(ctx, w.db, pokestops)
-	})
-	if err != nil {
-		log.Errorf("Failed to batch upsert pokestops after retries: %s", err)
-		return nil, err
-	}
-
-	// Return message IDs for ACK
-	ids := make([]string, len(ops))
-	for i, op := range ops {
-		ids[i] = op.MessageID
-	}
-
-	log.Infof("Processed batch of %d pokestops", len(pokestops))
-	return ids, nil
+	return successfulIds, nil
 }
 
 func (w *DBWriter) processGyms(ctx context.Context, ops []OperationData) ([]string, error) {
@@ -284,21 +284,28 @@ func (w *DBWriter) processGyms(ctx context.Context, ops []OperationData) ([]stri
 		return nil, nil
 	}
 
-	err := retryOnDeadlock(ctx, 3, func() error {
-		return db.BatchUpsertGyms(ctx, w.db, gyms)
-	})
-	if err != nil {
-		log.Errorf("Failed to batch upsert gyms after retries: %s", err)
-		return nil, err
+	// Process individually to handle partial failures
+	var successfulIds []string
+	successCount := 0
+
+	for i, gym := range gyms {
+		err := retryOnDeadlock(ctx, 3, func() error {
+			return db.BatchUpsertGyms(ctx, w.db, []*decoder.Gym{gym})
+		})
+
+		if err == nil {
+			successfulIds = append(successfulIds, ops[i].MessageID)
+			successCount++
+		} else {
+			log.Debugf("Failed to upsert gym %s: %s", gym.Id, err)
+		}
 	}
 
-	ids := make([]string, len(ops))
-	for i, op := range ops {
-		ids[i] = op.MessageID
+	if successCount > 0 {
+		log.Infof("Processed batch of %d gyms (%d successful, %d failed)", len(ops), successCount, len(ops)-successCount)
 	}
 
-	log.Infof("Processed batch of %d gyms", len(gyms))
-	return ids, nil
+	return successfulIds, nil
 }
 
 func (w *DBWriter) processSpawnpoints(ctx context.Context, ops []OperationData) ([]string, error) {
@@ -306,35 +313,33 @@ func (w *DBWriter) processSpawnpoints(ctx context.Context, ops []OperationData) 
 		return nil, nil
 	}
 
-	var spawnpoints []*decoder.Spawnpoint
+	var successfulIds []string
+	successCount := 0
+
 	for _, opData := range ops {
 		var spawnpoint decoder.Spawnpoint
 		if err := msgpack.Unmarshal(opData.Operation.Data, &spawnpoint); err != nil {
 			log.Errorf("Failed to unmarshal spawnpoint: %s", err)
 			continue
 		}
-		spawnpoints = append(spawnpoints, &spawnpoint)
+
+		err := retryOnDeadlock(ctx, 3, func() error {
+			return db.BatchUpsertSpawnpoints(ctx, w.db, []*decoder.Spawnpoint{&spawnpoint})
+		})
+
+		if err == nil {
+			successfulIds = append(successfulIds, opData.MessageID)
+			successCount++
+		} else {
+			log.Debugf("Failed to upsert spawnpoint %d: %s", spawnpoint.Id, err)
+		}
 	}
 
-	if len(spawnpoints) == 0 {
-		return nil, nil
+	if successCount > 0 {
+		log.Infof("Processed batch of %d spawnpoints (%d successful, %d failed)", len(ops), successCount, len(ops)-successCount)
 	}
 
-	err := retryOnDeadlock(ctx, 3, func() error {
-		return db.BatchUpsertSpawnpoints(ctx, w.db, spawnpoints)
-	})
-	if err != nil {
-		log.Errorf("Failed to batch upsert spawnpoints after retries: %s", err)
-		return nil, err
-	}
-
-	ids := make([]string, len(ops))
-	for i, op := range ops {
-		ids[i] = op.MessageID
-	}
-
-	log.Infof("Processed batch of %d spawnpoints", len(spawnpoints))
-	return ids, nil
+	return successfulIds, nil
 }
 
 func (w *DBWriter) processIncidents(ctx context.Context, ops []OperationData) ([]string, error) {
@@ -342,35 +347,33 @@ func (w *DBWriter) processIncidents(ctx context.Context, ops []OperationData) ([
 		return nil, nil
 	}
 
-	var incidents []*decoder.Incident
+	var successfulIds []string
+	successCount := 0
+
 	for _, opData := range ops {
 		var incident decoder.Incident
 		if err := msgpack.Unmarshal(opData.Operation.Data, &incident); err != nil {
 			log.Errorf("Failed to unmarshal incident: %s", err)
 			continue
 		}
-		incidents = append(incidents, &incident)
+
+		err := retryOnDeadlock(ctx, 3, func() error {
+			return db.BatchUpsertIncidents(ctx, w.db, []*decoder.Incident{&incident})
+		})
+
+		if err == nil {
+			successfulIds = append(successfulIds, opData.MessageID)
+			successCount++
+		} else {
+			log.Debugf("Failed to upsert incident %s: %s", incident.Id, err)
+		}
 	}
 
-	if len(incidents) == 0 {
-		return nil, nil
+	if successCount > 0 {
+		log.Infof("Processed batch of %d incidents (%d successful, %d failed)", len(ops), successCount, len(ops)-successCount)
 	}
 
-	err := retryOnDeadlock(ctx, 3, func() error {
-		return db.BatchUpsertIncidents(ctx, w.db, incidents)
-	})
-	if err != nil {
-		log.Errorf("Failed to batch upsert incidents after retries: %s", err)
-		return nil, err
-	}
-
-	ids := make([]string, len(ops))
-	for i, op := range ops {
-		ids[i] = op.MessageID
-	}
-
-	log.Infof("Processed batch of %d incidents", len(incidents))
-	return ids, nil
+	return successfulIds, nil
 }
 
 func (w *DBWriter) processTappables(ctx context.Context, ops []OperationData) ([]string, error) {
@@ -378,35 +381,33 @@ func (w *DBWriter) processTappables(ctx context.Context, ops []OperationData) ([
 		return nil, nil
 	}
 
-	var tappables []*decoder.Tappable
+	var successfulIds []string
+	successCount := 0
+
 	for _, opData := range ops {
 		var tappable decoder.Tappable
 		if err := msgpack.Unmarshal(opData.Operation.Data, &tappable); err != nil {
 			log.Errorf("Failed to unmarshal tappable: %s", err)
 			continue
 		}
-		tappables = append(tappables, &tappable)
+
+		err := retryOnDeadlock(ctx, 3, func() error {
+			return db.BatchUpsertTappables(ctx, w.db, []*decoder.Tappable{&tappable})
+		})
+
+		if err == nil {
+			successfulIds = append(successfulIds, opData.MessageID)
+			successCount++
+		} else {
+			log.Debugf("Failed to upsert tappable %d: %s", tappable.Id, err)
+		}
 	}
 
-	if len(tappables) == 0 {
-		return nil, nil
+	if successCount > 0 {
+		log.Infof("Processed batch of %d tappables (%d successful, %d failed)", len(ops), successCount, len(ops)-successCount)
 	}
 
-	err := retryOnDeadlock(ctx, 3, func() error {
-		return db.BatchUpsertTappables(ctx, w.db, tappables)
-	})
-	if err != nil {
-		log.Errorf("Failed to batch upsert tappables after retries: %s", err)
-		return nil, err
-	}
-
-	ids := make([]string, len(ops))
-	for i, op := range ops {
-		ids[i] = op.MessageID
-	}
-
-	log.Infof("Processed batch of %d tappables", len(tappables))
-	return ids, nil
+	return successfulIds, nil
 }
 
 func (w *DBWriter) processWeather(ctx context.Context, ops []OperationData) ([]string, error) {
@@ -414,35 +415,33 @@ func (w *DBWriter) processWeather(ctx context.Context, ops []OperationData) ([]s
 		return nil, nil
 	}
 
-	var weather []*decoder.Weather
+	var successfulIds []string
+	successCount := 0
+
 	for _, opData := range ops {
-		var w decoder.Weather
-		if err := msgpack.Unmarshal(opData.Operation.Data, &w); err != nil {
+		var weather decoder.Weather
+		if err := msgpack.Unmarshal(opData.Operation.Data, &weather); err != nil {
 			log.Errorf("Failed to unmarshal weather: %s", err)
 			continue
 		}
-		weather = append(weather, &w)
+
+		err := retryOnDeadlock(ctx, 3, func() error {
+			return db.BatchUpsertWeather(ctx, w.db, []*decoder.Weather{&weather})
+		})
+
+		if err == nil {
+			successfulIds = append(successfulIds, opData.MessageID)
+			successCount++
+		} else {
+			log.Debugf("Failed to upsert weather %d: %s", weather.Id, err)
+		}
 	}
 
-	if len(weather) == 0 {
-		return nil, nil
+	if successCount > 0 {
+		log.Infof("Processed batch of %d weather records (%d successful, %d failed)", len(ops), successCount, len(ops)-successCount)
 	}
 
-	err := retryOnDeadlock(ctx, 3, func() error {
-		return db.BatchUpsertWeather(ctx, w.db, weather)
-	})
-	if err != nil {
-		log.Errorf("Failed to batch upsert weather after retries: %s", err)
-		return nil, err
-	}
-
-	ids := make([]string, len(ops))
-	for i, op := range ops {
-		ids[i] = op.MessageID
-	}
-
-	log.Infof("Processed batch of %d weather records", len(weather))
-	return ids, nil
+	return successfulIds, nil
 }
 
 func (w *DBWriter) processStations(ctx context.Context, ops []OperationData) ([]string, error) {
@@ -450,35 +449,33 @@ func (w *DBWriter) processStations(ctx context.Context, ops []OperationData) ([]
 		return nil, nil
 	}
 
-	var stations []*decoder.Station
+	var successfulIds []string
+	successCount := 0
+
 	for _, opData := range ops {
 		var station decoder.Station
 		if err := msgpack.Unmarshal(opData.Operation.Data, &station); err != nil {
 			log.Errorf("Failed to unmarshal station: %s", err)
 			continue
 		}
-		stations = append(stations, &station)
+
+		err := retryOnDeadlock(ctx, 3, func() error {
+			return db.BatchUpsertStations(ctx, w.db, []*decoder.Station{&station})
+		})
+
+		if err == nil {
+			successfulIds = append(successfulIds, opData.MessageID)
+			successCount++
+		} else {
+			log.Debugf("Failed to upsert station %s: %s", station.Id, err)
+		}
 	}
 
-	if len(stations) == 0 {
-		return nil, nil
+	if successCount > 0 {
+		log.Infof("Processed batch of %d stations (%d successful, %d failed)", len(ops), successCount, len(ops)-successCount)
 	}
 
-	err := retryOnDeadlock(ctx, 3, func() error {
-		return db.BatchUpsertStations(ctx, w.db, stations)
-	})
-	if err != nil {
-		log.Errorf("Failed to batch upsert stations after retries: %s", err)
-		return nil, err
-	}
-
-	ids := make([]string, len(ops))
-	for i, op := range ops {
-		ids[i] = op.MessageID
-	}
-
-	log.Infof("Processed batch of %d stations", len(stations))
-	return ids, nil
+	return successfulIds, nil
 }
 
 func (w *DBWriter) processRoutes(ctx context.Context, ops []OperationData) ([]string, error) {
@@ -486,35 +483,33 @@ func (w *DBWriter) processRoutes(ctx context.Context, ops []OperationData) ([]st
 		return nil, nil
 	}
 
-	var routes []*decoder.Route
+	var successfulIds []string
+	successCount := 0
+
 	for _, opData := range ops {
 		var route decoder.Route
 		if err := msgpack.Unmarshal(opData.Operation.Data, &route); err != nil {
 			log.Errorf("Failed to unmarshal route: %s", err)
 			continue
 		}
-		routes = append(routes, &route)
+
+		err := retryOnDeadlock(ctx, 3, func() error {
+			return db.BatchUpsertRoutes(ctx, w.db, []*decoder.Route{&route})
+		})
+
+		if err == nil {
+			successfulIds = append(successfulIds, opData.MessageID)
+			successCount++
+		} else {
+			log.Debugf("Failed to upsert route %s: %s", route.Id, err)
+		}
 	}
 
-	if len(routes) == 0 {
-		return nil, nil
+	if successCount > 0 {
+		log.Infof("Processed batch of %d routes (%d successful, %d failed)", len(ops), successCount, len(ops)-successCount)
 	}
 
-	err := retryOnDeadlock(ctx, 3, func() error {
-		return db.BatchUpsertRoutes(ctx, w.db, routes)
-	})
-	if err != nil {
-		log.Errorf("Failed to batch upsert routes after retries: %s", err)
-		return nil, err
-	}
-
-	ids := make([]string, len(ops))
-	for i, op := range ops {
-		ids[i] = op.MessageID
-	}
-
-	log.Infof("Processed batch of %d routes", len(routes))
-	return ids, nil
+	return successfulIds, nil
 }
 
 func (w *DBWriter) processS2Cells(ctx context.Context, ops []OperationData) ([]string, error) {
@@ -522,35 +517,33 @@ func (w *DBWriter) processS2Cells(ctx context.Context, ops []OperationData) ([]s
 		return nil, nil
 	}
 
-	var cells []*decoder.S2Cell
+	var successfulIds []string
+	successCount := 0
+
 	for _, opData := range ops {
 		var cell decoder.S2Cell
 		if err := msgpack.Unmarshal(opData.Operation.Data, &cell); err != nil {
 			log.Errorf("Failed to unmarshal s2cell: %s", err)
 			continue
 		}
-		cells = append(cells, &cell)
+
+		err := retryOnDeadlock(ctx, 3, func() error {
+			return db.BatchUpsertS2Cells(ctx, w.db, []*decoder.S2Cell{&cell})
+		})
+
+		if err == nil {
+			successfulIds = append(successfulIds, opData.MessageID)
+			successCount++
+		} else {
+			log.Debugf("Failed to upsert s2cell %d: %s", cell.Id, err)
+		}
 	}
 
-	if len(cells) == 0 {
-		return nil, nil
+	if successCount > 0 {
+		log.Infof("Processed batch of %d s2cells (%d successful, %d failed)", len(ops), successCount, len(ops)-successCount)
 	}
 
-	err := retryOnDeadlock(ctx, 3, func() error {
-		return db.BatchUpsertS2Cells(ctx, w.db, cells)
-	})
-	if err != nil {
-		log.Errorf("Failed to batch upsert s2cells after retries: %s", err)
-		return nil, err
-	}
-
-	ids := make([]string, len(ops))
-	for i, op := range ops {
-		ids[i] = op.MessageID
-	}
-
-	log.Infof("Processed batch of %d s2cells", len(cells))
-	return ids, nil
+	return successfulIds, nil
 }
 
 func (w *DBWriter) processPlayers(ctx context.Context, ops []OperationData) ([]string, error) {
@@ -558,33 +551,31 @@ func (w *DBWriter) processPlayers(ctx context.Context, ops []OperationData) ([]s
 		return nil, nil
 	}
 
-	var players []*decoder.Player
+	var successfulIds []string
+	successCount := 0
+
 	for _, opData := range ops {
 		var player decoder.Player
 		if err := msgpack.Unmarshal(opData.Operation.Data, &player); err != nil {
 			log.Errorf("Failed to unmarshal player: %s", err)
 			continue
 		}
-		players = append(players, &player)
+
+		err := retryOnDeadlock(ctx, 3, func() error {
+			return db.BatchUpsertPlayers(ctx, w.db, []*decoder.Player{&player})
+		})
+
+		if err == nil {
+			successfulIds = append(successfulIds, opData.MessageID)
+			successCount++
+		} else {
+			log.Debugf("Failed to upsert player %s: %s", player.Name, err)
+		}
 	}
 
-	if len(players) == 0 {
-		return nil, nil
+	if successCount > 0 {
+		log.Infof("Processed batch of %d players (%d successful, %d failed)", len(ops), successCount, len(ops)-successCount)
 	}
 
-	err := retryOnDeadlock(ctx, 3, func() error {
-		return db.BatchUpsertPlayers(ctx, w.db, players)
-	})
-	if err != nil {
-		log.Errorf("Failed to batch upsert players after retries: %s", err)
-		return nil, err
-	}
-
-	ids := make([]string, len(ops))
-	for i, op := range ops {
-		ids[i] = op.MessageID
-	}
-
-	log.Infof("Processed batch of %d players", len(players))
-	return ids, nil
+	return successfulIds, nil
 }

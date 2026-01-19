@@ -161,47 +161,53 @@ func saveWeatherRecord(ctx context.Context, db db.DbDetails, weather *Weather) {
 		return
 	}
 
-	if oldWeather == nil {
-		res, err := db.GeneralDb.NamedExecContext(ctx,
-			"INSERT INTO weather ("+
-				"id, latitude, longitude, level, gameplay_condition, wind_direction, cloud_level, rain_level, "+
-				"wind_level, snow_level, fog_level, special_effect_level, severity, warn_weather, updated)"+
-				"VALUES ("+
-				":id, :latitude, :longitude, :level, :gameplay_condition, :wind_direction, :cloud_level, :rain_level, "+
-				":wind_level, :snow_level, :fog_level, :special_effect_level, :severity, :warn_weather, "+
-				":updated/1000)",
-			weather)
-		statsCollector.IncDbQuery("insert weather", err)
-		if err != nil {
-			log.Errorf("insert weather: %s", err)
-			return
-		}
-		_ = res
-	} else {
-		res, err := db.GeneralDb.NamedExecContext(ctx, "UPDATE weather SET "+
-			"latitude = :latitude, "+
-			"longitude = :longitude, "+
-			"level = :level, "+
-			"gameplay_condition = :gameplay_condition, "+
-			"wind_direction = :wind_direction, "+
-			"cloud_level = :cloud_level, "+
-			"rain_level = :rain_level, "+
-			"wind_level = :wind_level, "+
-			"snow_level = :snow_level, "+
-			"fog_level = :fog_level, "+
-			"special_effect_level = :special_effect_level, "+
-			"severity = :severity, "+
-			"warn_weather = :warn_weather, "+
-			"updated = :updated/1000 "+
-			"WHERE id = :id",
-			weather)
-		statsCollector.IncDbQuery("update weather", err)
-		if err != nil {
-			log.Errorf("update weather: %s", err)
-			return
-		}
-		_ = res
-	}
+	// Update L1 cache immediately for read consistency
 	weatherCache.Set(weather.Id, *weather, ttlcache.DefaultTTL)
+
+	// Queue write to database
+	if redisEnabled {
+		if err := queueWrite(ctx, "weather", "upsert", weather); err != nil {
+			log.Warnf("Failed to queue weather write for %d: %s", weather.Id, err)
+			// Fall back to direct DB write
+			saveWeatherRecordDirect(ctx, db, weather)
+		}
+	} else {
+		// Direct DB write if Redis not enabled
+		saveWeatherRecordDirect(ctx, db, weather)
+	}
+
 	createWeatherWebhooks(oldWeather, weather)
+}
+
+// saveWeatherRecordDirect writes directly to DB (fallback or no-Redis mode)
+func saveWeatherRecordDirect(ctx context.Context, db db.DbDetails, weather *Weather) {
+	res, err := db.GeneralDb.NamedExecContext(ctx,
+		`INSERT INTO weather (
+			id, latitude, longitude, level, gameplay_condition, wind_direction, cloud_level, rain_level,
+			wind_level, snow_level, fog_level, special_effect_level, severity, warn_weather, updated)
+		VALUES (
+			:id, :latitude, :longitude, :level, :gameplay_condition, :wind_direction, :cloud_level, :rain_level,
+			:wind_level, :snow_level, :fog_level, :special_effect_level, :severity, :warn_weather, :updated/1000)
+		ON DUPLICATE KEY UPDATE
+			latitude = VALUES(latitude),
+			longitude = VALUES(longitude),
+			level = VALUES(level),
+			gameplay_condition = VALUES(gameplay_condition),
+			wind_direction = VALUES(wind_direction),
+			cloud_level = VALUES(cloud_level),
+			rain_level = VALUES(rain_level),
+			wind_level = VALUES(wind_level),
+			snow_level = VALUES(snow_level),
+			fog_level = VALUES(fog_level),
+			special_effect_level = VALUES(special_effect_level),
+			severity = VALUES(severity),
+			warn_weather = VALUES(warn_weather),
+			updated = VALUES(updated)`,
+		weather)
+
+	statsCollector.IncDbQuery("upsert weather", err)
+	if err != nil {
+		log.Errorf("upsert weather %d: %s", weather.Id, err)
+	}
+	_ = res
 }

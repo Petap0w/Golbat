@@ -85,63 +85,63 @@ func saveStationRecord(ctx context.Context, db db.DbDetails, station *Station) {
 
 	station.Updated = now
 
-	//log.Traceln(cmp.Diff(oldStation, station))
-	if oldStation == nil {
-		res, err := db.GeneralDb.NamedExecContext(ctx,
-			`
-			INSERT INTO station (id, lat, lon, name, cell_id, start_time, end_time, cooldown_complete, is_battle_available, is_inactive, updated, battle_level, battle_start, battle_end, battle_pokemon_id, battle_pokemon_form, battle_pokemon_costume, battle_pokemon_gender, battle_pokemon_alignment, battle_pokemon_bread_mode, battle_pokemon_move_1, battle_pokemon_move_2, battle_pokemon_stamina, battle_pokemon_cp_multiplier, total_stationed_pokemon, total_stationed_gmax, stationed_pokemon)
-			VALUES (:id,:lat,:lon,:name,:cell_id,:start_time,:end_time,:cooldown_complete,:is_battle_available,:is_inactive,:updated,:battle_level,:battle_start,:battle_end,:battle_pokemon_id,:battle_pokemon_form,:battle_pokemon_costume,:battle_pokemon_gender,:battle_pokemon_alignment,:battle_pokemon_bread_mode,:battle_pokemon_move_1,:battle_pokemon_move_2,:battle_pokemon_stamina,:battle_pokemon_cp_multiplier,:total_stationed_pokemon,:total_stationed_gmax,:stationed_pokemon)
-			`, station)
+	// Update L1 cache immediately for read consistency
+	stationCache.Set(station.Id, *station, ttlcache.DefaultTTL)
 
-		statsCollector.IncDbQuery("insert station", err)
-		if err != nil {
-			log.Errorf("insert station: %s", err)
-			return
+	// Queue write to database
+	if redisEnabled {
+		if err := queueWrite(ctx, "station", "upsert", station); err != nil {
+			log.Warnf("Failed to queue station write for %s: %s", station.Id, err)
+			// Fall back to direct DB write
+			saveStationRecordDirect(ctx, db, station)
 		}
-		_, _ = res, err
 	} else {
-		res, err := db.GeneralDb.NamedExecContext(ctx, `
-			UPDATE station
-			SET
-			    lat = :lat,
-			    lon = :lon,
-			    name = :name,
-			    cell_id = :cell_id,
-			    start_time = :start_time,
-			    end_time = :end_time,
-			    cooldown_complete = :cooldown_complete,
-			    is_battle_available = :is_battle_available,
-			    is_inactive = :is_inactive,
-			    updated = :updated,
-			    battle_level = :battle_level,
-			    battle_start = :battle_start,
-			    battle_end = :battle_end,
-			    battle_pokemon_id = :battle_pokemon_id,
-			    battle_pokemon_form = :battle_pokemon_form,
-			    battle_pokemon_costume = :battle_pokemon_costume,
-			    battle_pokemon_gender = :battle_pokemon_gender,
-			    battle_pokemon_alignment = :battle_pokemon_alignment,
-			    battle_pokemon_bread_mode = :battle_pokemon_bread_mode,
-			    battle_pokemon_move_1 = :battle_pokemon_move_1,
-			    battle_pokemon_move_2 = :battle_pokemon_move_2,
-			    battle_pokemon_stamina = :battle_pokemon_stamina,
-			    battle_pokemon_cp_multiplier = :battle_pokemon_cp_multiplier,
-			    total_stationed_pokemon = :total_stationed_pokemon,
-			    total_stationed_gmax = :total_stationed_gmax,
-			    stationed_pokemon = :stationed_pokemon
-			WHERE id = :id
-		`, station,
-		)
-		statsCollector.IncDbQuery("update station", err)
-		if err != nil {
-			log.Errorf("Update station %s", err)
-		}
-		_, _ = res, err
+		// Direct DB write if Redis not enabled
+		saveStationRecordDirect(ctx, db, station)
 	}
 
-	stationCache.Set(station.Id, *station, ttlcache.DefaultTTL)
 	createStationWebhooks(oldStation, station)
+}
 
+// saveStationRecordDirect writes directly to DB (fallback or no-Redis mode)
+func saveStationRecordDirect(ctx context.Context, db db.DbDetails, station *Station) {
+	res, err := db.GeneralDb.NamedExecContext(ctx,
+		`INSERT INTO station (id, lat, lon, name, cell_id, start_time, end_time, cooldown_complete, is_battle_available, is_inactive, updated, battle_level, battle_start, battle_end, battle_pokemon_id, battle_pokemon_form, battle_pokemon_costume, battle_pokemon_gender, battle_pokemon_alignment, battle_pokemon_bread_mode, battle_pokemon_move_1, battle_pokemon_move_2, battle_pokemon_stamina, battle_pokemon_cp_multiplier, total_stationed_pokemon, total_stationed_gmax, stationed_pokemon)
+		VALUES (:id,:lat,:lon,:name,:cell_id,:start_time,:end_time,:cooldown_complete,:is_battle_available,:is_inactive,:updated,:battle_level,:battle_start,:battle_end,:battle_pokemon_id,:battle_pokemon_form,:battle_pokemon_costume,:battle_pokemon_gender,:battle_pokemon_alignment,:battle_pokemon_bread_mode,:battle_pokemon_move_1,:battle_pokemon_move_2,:battle_pokemon_stamina,:battle_pokemon_cp_multiplier,:total_stationed_pokemon,:total_stationed_gmax,:stationed_pokemon)
+		ON DUPLICATE KEY UPDATE
+			lat = VALUES(lat),
+			lon = VALUES(lon),
+			name = VALUES(name),
+			cell_id = VALUES(cell_id),
+			start_time = VALUES(start_time),
+			end_time = VALUES(end_time),
+			cooldown_complete = VALUES(cooldown_complete),
+			is_battle_available = VALUES(is_battle_available),
+			is_inactive = VALUES(is_inactive),
+			updated = VALUES(updated),
+			battle_level = VALUES(battle_level),
+			battle_start = VALUES(battle_start),
+			battle_end = VALUES(battle_end),
+			battle_pokemon_id = VALUES(battle_pokemon_id),
+			battle_pokemon_form = VALUES(battle_pokemon_form),
+			battle_pokemon_costume = VALUES(battle_pokemon_costume),
+			battle_pokemon_gender = VALUES(battle_pokemon_gender),
+			battle_pokemon_alignment = VALUES(battle_pokemon_alignment),
+			battle_pokemon_bread_mode = VALUES(battle_pokemon_bread_mode),
+			battle_pokemon_move_1 = VALUES(battle_pokemon_move_1),
+			battle_pokemon_move_2 = VALUES(battle_pokemon_move_2),
+			battle_pokemon_stamina = VALUES(battle_pokemon_stamina),
+			battle_pokemon_cp_multiplier = VALUES(battle_pokemon_cp_multiplier),
+			total_stationed_pokemon = VALUES(total_stationed_pokemon),
+			total_stationed_gmax = VALUES(total_stationed_gmax),
+			stationed_pokemon = VALUES(stationed_pokemon)`,
+		station)
+
+	statsCollector.IncDbQuery("upsert station", err)
+	if err != nil {
+		log.Errorf("upsert station %s: %s", station.Id, err)
+	}
+	_ = res
 }
 
 // hasChangesStation compares two Station structs

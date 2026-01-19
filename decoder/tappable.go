@@ -159,44 +159,50 @@ func saveTappableRecord(ctx context.Context, details db.DbDetails, tappable *Tap
 		return
 	}
 	tappable.Updated = now
-	if oldTappable == nil {
-		res, err := details.GeneralDb.NamedExecContext(ctx, fmt.Sprintf(`
-			INSERT INTO tappable (
-				id, lat, lon, fort_id, spawn_id, type, pokemon_id, item_id, count, expire_timestamp, expire_timestamp_verified, updated
-			) VALUES (
-				"%d", :lat, :lon, :fort_id, :spawn_id, :type, :pokemon_id, :item_id, :count, :expire_timestamp, :expire_timestamp_verified, :updated
-			)
-			`, tappable.Id), tappable)
-		statsCollector.IncDbQuery("insert tappable", err)
-		if err != nil {
-			log.Errorf("insert tappable %d: %s", tappable.Id, err)
-			return
-		}
-		_ = res
-	} else {
-		res, err := details.GeneralDb.NamedExecContext(ctx, fmt.Sprintf(`
-			UPDATE tappable SET
-				lat = :lat,
-				lon = :lon,
-				fort_id = :fort_id,
-				spawn_id = :spawn_id,
-				type = :type,
-				pokemon_id = :pokemon_id,
-				item_id = :item_id,
-				count = :count,
-				expire_timestamp = :expire_timestamp, 
-				expire_timestamp_verified = :expire_timestamp_verified,
-				updated = :updated
-			WHERE id = "%d"
-			`, tappable.Id), tappable)
-		statsCollector.IncDbQuery("update tappable", err)
-		if err != nil {
-			log.Errorf("update tappable %d: %s", tappable.Id, err)
-			return
-		}
-		_ = res
-	}
+
+	// Update L1 cache immediately for read consistency
 	tappableCache.Set(tappable.Id, *tappable, ttlcache.DefaultTTL)
+
+	// Queue write to database
+	if redisEnabled {
+		if err := queueWrite(ctx, "tappable", "upsert", tappable); err != nil {
+			log.Warnf("Failed to queue tappable write for %d: %s", tappable.Id, err)
+			// Fall back to direct DB write
+			saveTappableRecordDirect(ctx, details, tappable)
+		}
+	} else {
+		// Direct DB write if Redis not enabled
+		saveTappableRecordDirect(ctx, details, tappable)
+	}
+}
+
+// saveTappableRecordDirect writes directly to DB (fallback or no-Redis mode)
+func saveTappableRecordDirect(ctx context.Context, details db.DbDetails, tappable *Tappable) {
+	res, err := details.GeneralDb.NamedExecContext(ctx, fmt.Sprintf(`
+		INSERT INTO tappable (
+			id, lat, lon, fort_id, spawn_id, type, pokemon_id, item_id, count, expire_timestamp, expire_timestamp_verified, updated
+		) VALUES (
+			"%d", :lat, :lon, :fort_id, :spawn_id, :type, :pokemon_id, :item_id, :count, :expire_timestamp, :expire_timestamp_verified, :updated
+		)
+		ON DUPLICATE KEY UPDATE
+			lat = VALUES(lat),
+			lon = VALUES(lon),
+			fort_id = VALUES(fort_id),
+			spawn_id = VALUES(spawn_id),
+			type = VALUES(type),
+			pokemon_id = VALUES(pokemon_id),
+			item_id = VALUES(item_id),
+			count = VALUES(count),
+			expire_timestamp = VALUES(expire_timestamp),
+			expire_timestamp_verified = VALUES(expire_timestamp_verified),
+			updated = VALUES(updated)
+		`, tappable.Id), tappable)
+
+	statsCollector.IncDbQuery("upsert tappable", err)
+	if err != nil {
+		log.Errorf("upsert tappable %d: %s", tappable.Id, err)
+	}
+	_ = res
 }
 
 func hasChangesTappable(old *Tappable, new *Tappable) bool {

@@ -1,6 +1,7 @@
 package decoder
 
 import (
+	"context"
 	"database/sql"
 	"reflect"
 	"strconv"
@@ -343,140 +344,137 @@ func savePlayerRecord(db db.DbDetails, player *Player) {
 		return
 	}
 
-	//log.Traceln(cmp.Diff(oldPlayer, player, transformNullFloats, ignoreApproxFloats))
-
 	player.LastSeen = time.Now().Unix()
 
-	if oldPlayer == nil {
-		_, err := db.GeneralDb.NamedExec(
-			`
-			INSERT INTO player (name, friendship_id, friend_code, last_seen, team, level, xp, battles_won, km_walked, caught_pokemon, gbl_rank, gbl_rating,
-								event_badges, stops_spun, evolved, hatched, quests, trades, photobombs, purified, grunts_defeated,
-								gym_battles_won, normal_raids_won, legendary_raids_won, trainings_won, berries_fed, hours_defended,
-								best_friends, best_buddies, giovanni_defeated, mega_evos, collections_done, unique_stops_spun,
-								unique_mega_evos, unique_raid_bosses, unique_unown, seven_day_streaks, trade_km, raids_with_friends,
-								caught_at_lure, wayfarer_agreements, trainers_referred, raid_achievements, xl_karps, xs_rats,
-								pikachu_caught, league_great_won, league_ultra_won, league_master_won, tiny_pokemon_caught,
-								jumbo_pokemon_caught, vivillon, showcase_max_size_first_place, total_route_play, parties_completed, event_check_ins, dex_gen1, dex_gen2, dex_gen3, dex_gen4, dex_gen5, dex_gen6,
-								dex_gen7, dex_gen8, dex_gen8a, dex_gen9, caught_normal, caught_fighting, caught_flying, caught_poison,
-								caught_ground, caught_rock, caught_bug, caught_ghost, caught_steel, caught_fire, caught_water,
-								caught_grass, caught_electric, caught_psychic, caught_ice, caught_dragon, caught_dark, caught_fairy)
-			VALUES (:name, :friendship_id, :friend_code, :last_seen, :team, :level, :xp, :battles_won, :km_walked, :caught_pokemon, :gbl_rank, :gbl_rating,
-					:event_badges, :stops_spun, :evolved, :hatched, :quests, :trades, :photobombs, :purified, :grunts_defeated,
-					:gym_battles_won, :normal_raids_won, :legendary_raids_won, :trainings_won, :berries_fed, :hours_defended,
-					:best_friends, :best_buddies, :giovanni_defeated, :mega_evos, :collections_done, :unique_stops_spun,
-					:unique_mega_evos, :unique_raid_bosses, :unique_unown, :seven_day_streaks, :trade_km, :raids_with_friends,
-					:caught_at_lure, :wayfarer_agreements, :trainers_referred, :raid_achievements, :xl_karps, :xs_rats,
-					:pikachu_caught, :league_great_won, :league_ultra_won, :league_master_won, :tiny_pokemon_caught,
-					:jumbo_pokemon_caught, :vivillon, :showcase_max_size_first_place, :total_route_play, :parties_completed, :event_check_ins, :dex_gen1, :dex_gen2, :dex_gen3, :dex_gen4, :dex_gen5, :dex_gen6, :dex_gen7,
-					:dex_gen8, :dex_gen8a, :dex_gen9, :caught_normal, :caught_fighting, :caught_flying, :caught_poison, :caught_ground,
-					:caught_rock, :caught_bug, :caught_ghost, :caught_steel, :caught_fire, :caught_water, :caught_grass,
-					:caught_electric, :caught_psychic, :caught_ice, :caught_dragon, :caught_dark, :caught_fairy)
-			`,
-			player,
-		)
+	// Update L1 cache immediately
+	playerCache.Set(player.Name, *player, ttlcache.DefaultTTL)
 
-		statsCollector.IncDbQuery("insert player", err)
-		if err != nil {
-			log.Errorf("insert player error: %s", err)
-			return
+	// Queue write to database
+	ctx := context.TODO()
+	if redisEnabled {
+		if err := queueWrite(ctx, "player", "upsert", player); err != nil {
+			log.Warnf("Failed to queue player write for %s: %s", player.Name, err)
+			savePlayerRecordDirect(db, player)
 		}
 	} else {
-		_, err := db.GeneralDb.NamedExec(
-			`UPDATE player SET
-				friendship_id = :friendship_id, 
-				last_seen = :last_seen, 
-				team = :team, 
-				level = :level, 
-				xp = :xp, 
-				battles_won = :battles_won, 
-				km_walked = :km_walked, 
-				caught_pokemon = :caught_pokemon, 
-				gbl_rank = :gbl_rank, 
-				gbl_rating = :gbl_rating, 
-				event_badges = :event_badges, 
-				stops_spun = :stops_spun, 
-				evolved = :evolved, 
-				hatched = :hatched, 
-				quests = :quests, 
-				trades = :trades, 
-				photobombs = :photobombs, 
-				purified = :purified, 
-				grunts_defeated = :grunts_defeated, 
-				gym_battles_won = :gym_battles_won, 
-				normal_raids_won = :normal_raids_won, 
-				legendary_raids_won = :legendary_raids_won, 
-				trainings_won = :trainings_won, 
-				berries_fed = :berries_fed, 
-				hours_defended = :hours_defended, 
-				best_friends = :best_friends, 
-				best_buddies = :best_buddies, 
-				giovanni_defeated = :giovanni_defeated, 
-				mega_evos = :mega_evos, 
-				collections_done = :collections_done, 
-				unique_stops_spun = :unique_stops_spun, 
-				unique_mega_evos = :unique_mega_evos, 
-				unique_raid_bosses = :unique_raid_bosses, 
-				unique_unown = :unique_unown, 
-				seven_day_streaks = :seven_day_streaks, 
-				trade_km = :trade_km, 
-				raids_with_friends = :raids_with_friends, 
-				caught_at_lure = :caught_at_lure, 
-				wayfarer_agreements = :wayfarer_agreements, 
-				trainers_referred = :trainers_referred, 
-				raid_achievements = :raid_achievements, 
-				xl_karps = :xl_karps, 
-				xs_rats = :xs_rats, 
-				pikachu_caught = :pikachu_caught, 
-				league_great_won = :league_great_won, 
-				league_ultra_won = :league_ultra_won, 
-				league_master_won = :league_master_won, 
-				tiny_pokemon_caught = :tiny_pokemon_caught, 
-				jumbo_pokemon_caught = :jumbo_pokemon_caught, 
-				vivillon = :vivillon, 
-				showcase_max_size_first_place = :showcase_max_size_first_place,
-				total_route_play = :total_route_play,
-				parties_completed = :parties_completed,
-				event_check_ins = :event_check_ins, 
-				dex_gen1 = :dex_gen1, 
-				dex_gen2 = :dex_gen2, 
-				dex_gen3 = :dex_gen3, 
-				dex_gen4 = :dex_gen4, 
-				dex_gen5 = :dex_gen5, 
-				dex_gen6 = :dex_gen6, 
-				dex_gen7 = :dex_gen7, 
-				dex_gen8 = :dex_gen8, 
-				dex_gen8a = :dex_gen8a, 
-				dex_gen9 = :dex_gen9,
-				caught_normal = :caught_normal, 
-				caught_fighting = :caught_fighting, 
-				caught_flying = :caught_flying, 
-				caught_poison = :caught_poison, 
-				caught_ground = :caught_ground, 
-				caught_rock = :caught_rock, 
-				caught_bug = :caught_bug, 
-				caught_ghost = :caught_ghost, 
-				caught_steel = :caught_steel, 
-				caught_fire = :caught_fire, 
-				caught_water = :caught_water, 
-				caught_grass = :caught_grass, 
-				caught_electric = :caught_electric, 
-				caught_psychic = :caught_psychic, 
-				caught_ice = :caught_ice, 
-				caught_dragon = :caught_dragon, 
-				caught_dark = :caught_dark, 
-				caught_fairy = :caught_fairy 
-				WHERE name = :name`,
-			player,
-		)
-
-		statsCollector.IncDbQuery("update player", err)
-		if err != nil {
-			log.Errorf("Update player error %s", err)
-		}
+		savePlayerRecordDirect(db, player)
 	}
+}
 
-	playerCache.Set(player.Name, *player, ttlcache.DefaultTTL)
+// savePlayerRecordDirect writes directly to DB (fallback or no-Redis mode)
+func savePlayerRecordDirect(db db.DbDetails, player *Player) {
+	_, err := db.GeneralDb.NamedExec(
+		`INSERT INTO player (name, friendship_id, friend_code, last_seen, team, level, xp, battles_won, km_walked, caught_pokemon, gbl_rank, gbl_rating,
+			event_badges, stops_spun, evolved, hatched, quests, trades, photobombs, purified, grunts_defeated,
+			gym_battles_won, normal_raids_won, legendary_raids_won, trainings_won, berries_fed, hours_defended,
+			best_friends, best_buddies, giovanni_defeated, mega_evos, collections_done, unique_stops_spun,
+			unique_mega_evos, unique_raid_bosses, unique_unown, seven_day_streaks, trade_km, raids_with_friends,
+			caught_at_lure, wayfarer_agreements, trainers_referred, raid_achievements, xl_karps, xs_rats,
+			pikachu_caught, league_great_won, league_ultra_won, league_master_won, tiny_pokemon_caught,
+			jumbo_pokemon_caught, vivillon, showcase_max_size_first_place, total_route_play, parties_completed, event_check_ins, dex_gen1, dex_gen2, dex_gen3, dex_gen4, dex_gen5, dex_gen6,
+			dex_gen7, dex_gen8, dex_gen8a, dex_gen9, caught_normal, caught_fighting, caught_flying, caught_poison,
+			caught_ground, caught_rock, caught_bug, caught_ghost, caught_steel, caught_fire, caught_water,
+			caught_grass, caught_electric, caught_psychic, caught_ice, caught_dragon, caught_dark, caught_fairy)
+		VALUES (:name, :friendship_id, :friend_code, :last_seen, :team, :level, :xp, :battles_won, :km_walked, :caught_pokemon, :gbl_rank, :gbl_rating,
+			:event_badges, :stops_spun, :evolved, :hatched, :quests, :trades, :photobombs, :purified, :grunts_defeated,
+			:gym_battles_won, :normal_raids_won, :legendary_raids_won, :trainings_won, :berries_fed, :hours_defended,
+			:best_friends, :best_buddies, :giovanni_defeated, :mega_evos, :collections_done, :unique_stops_spun,
+			:unique_mega_evos, :unique_raid_bosses, :unique_unown, :seven_day_streaks, :trade_km, :raids_with_friends,
+			:caught_at_lure, :wayfarer_agreements, :trainers_referred, :raid_achievements, :xl_karps, :xs_rats,
+			:pikachu_caught, :league_great_won, :league_ultra_won, :league_master_won, :tiny_pokemon_caught,
+			:jumbo_pokemon_caught, :vivillon, :showcase_max_size_first_place, :total_route_play, :parties_completed, :event_check_ins, :dex_gen1, :dex_gen2, :dex_gen3, :dex_gen4, :dex_gen5, :dex_gen6, :dex_gen7,
+			:dex_gen8, :dex_gen8a, :dex_gen9, :caught_normal, :caught_fighting, :caught_flying, :caught_poison, :caught_ground,
+			:caught_rock, :caught_bug, :caught_ghost, :caught_steel, :caught_fire, :caught_water, :caught_grass,
+			:caught_electric, :caught_psychic, :caught_ice, :caught_dragon, :caught_dark, :caught_fairy)
+		ON DUPLICATE KEY UPDATE
+			friendship_id = VALUES(friendship_id),
+			last_seen = VALUES(last_seen),
+			team = VALUES(team),
+			level = VALUES(level),
+			xp = VALUES(xp),
+			battles_won = VALUES(battles_won),
+			km_walked = VALUES(km_walked),
+			caught_pokemon = VALUES(caught_pokemon),
+			gbl_rank = VALUES(gbl_rank),
+			gbl_rating = VALUES(gbl_rating),
+			event_badges = VALUES(event_badges),
+			stops_spun = VALUES(stops_spun),
+			evolved = VALUES(evolved),
+			hatched = VALUES(hatched),
+			quests = VALUES(quests),
+			trades = VALUES(trades),
+			photobombs = VALUES(photobombs),
+			purified = VALUES(purified),
+			grunts_defeated = VALUES(grunts_defeated),
+			gym_battles_won = VALUES(gym_battles_won),
+			normal_raids_won = VALUES(normal_raids_won),
+			legendary_raids_won = VALUES(legendary_raids_won),
+			trainings_won = VALUES(trainings_won),
+			berries_fed = VALUES(berries_fed),
+			hours_defended = VALUES(hours_defended),
+			best_friends = VALUES(best_friends),
+			best_buddies = VALUES(best_buddies),
+			giovanni_defeated = VALUES(giovanni_defeated),
+			mega_evos = VALUES(mega_evos),
+			collections_done = VALUES(collections_done),
+			unique_stops_spun = VALUES(unique_stops_spun),
+			unique_mega_evos = VALUES(unique_mega_evos),
+			unique_raid_bosses = VALUES(unique_raid_bosses),
+			unique_unown = VALUES(unique_unown),
+			seven_day_streaks = VALUES(seven_day_streaks),
+			trade_km = VALUES(trade_km),
+			raids_with_friends = VALUES(raids_with_friends),
+			caught_at_lure = VALUES(caught_at_lure),
+			wayfarer_agreements = VALUES(wayfarer_agreements),
+			trainers_referred = VALUES(trainers_referred),
+			raid_achievements = VALUES(raid_achievements),
+			xl_karps = VALUES(xl_karps),
+			xs_rats = VALUES(xs_rats),
+			pikachu_caught = VALUES(pikachu_caught),
+			league_great_won = VALUES(league_great_won),
+			league_ultra_won = VALUES(league_ultra_won),
+			league_master_won = VALUES(league_master_won),
+			tiny_pokemon_caught = VALUES(tiny_pokemon_caught),
+			jumbo_pokemon_caught = VALUES(jumbo_pokemon_caught),
+			vivillon = VALUES(vivillon),
+			showcase_max_size_first_place = VALUES(showcase_max_size_first_place),
+			total_route_play = VALUES(total_route_play),
+			parties_completed = VALUES(parties_completed),
+			event_check_ins = VALUES(event_check_ins),
+			dex_gen1 = VALUES(dex_gen1),
+			dex_gen2 = VALUES(dex_gen2),
+			dex_gen3 = VALUES(dex_gen3),
+			dex_gen4 = VALUES(dex_gen4),
+			dex_gen5 = VALUES(dex_gen5),
+			dex_gen6 = VALUES(dex_gen6),
+			dex_gen7 = VALUES(dex_gen7),
+			dex_gen8 = VALUES(dex_gen8),
+			dex_gen8a = VALUES(dex_gen8a),
+			dex_gen9 = VALUES(dex_gen9),
+			caught_normal = VALUES(caught_normal),
+			caught_fighting = VALUES(caught_fighting),
+			caught_flying = VALUES(caught_flying),
+			caught_poison = VALUES(caught_poison),
+			caught_ground = VALUES(caught_ground),
+			caught_rock = VALUES(caught_rock),
+			caught_bug = VALUES(caught_bug),
+			caught_ghost = VALUES(caught_ghost),
+			caught_steel = VALUES(caught_steel),
+			caught_fire = VALUES(caught_fire),
+			caught_water = VALUES(caught_water),
+			caught_grass = VALUES(caught_grass),
+			caught_electric = VALUES(caught_electric),
+			caught_psychic = VALUES(caught_psychic),
+			caught_ice = VALUES(caught_ice),
+			caught_dragon = VALUES(caught_dragon),
+			caught_dark = VALUES(caught_dark),
+			caught_fairy = VALUES(caught_fairy)`,
+		player)
+
+	statsCollector.IncDbQuery("upsert player", err)
+	if err != nil {
+		log.Errorf("upsert player %s: %s", player.Name, err)
+	}
 }
 
 func (player *Player) updateFromPublicProfile(publicProfile *pogo.PlayerPublicProfileProto) {
