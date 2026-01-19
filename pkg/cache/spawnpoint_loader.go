@@ -199,7 +199,6 @@ func LoadFortsToRedis(ctx context.Context, db *sqlx.DB, l2Cache *L2Cache) error 
 
 	// Load pokestops
 	pokestopQuery := "SELECT * FROM pokestop"
-	var pokestops []interface{}
 	rows, err := db.QueryxContext(ctx, pokestopQuery)
 	if err != nil {
 		return fmt.Errorf("failed to query pokestops: %w", err)
@@ -209,7 +208,7 @@ func LoadFortsToRedis(ctx context.Context, db *sqlx.DB, l2Cache *L2Cache) error 
 	count := 0
 	batch := make(map[string]interface{})
 	for rows.Next() {
-		var pokestop map[string]interface{}
+		pokestop := make(map[string]interface{}) // Initialize the map!
 		if err := rows.MapScan(pokestop); err != nil {
 			log.Warnf("Failed to scan pokestop: %s", err)
 			continue
@@ -247,7 +246,7 @@ func LoadFortsToRedis(ctx context.Context, db *sqlx.DB, l2Cache *L2Cache) error 
 	count = 0
 	batch = make(map[string]interface{})
 	for rows.Next() {
-		var gym map[string]interface{}
+		gym := make(map[string]interface{}) // Initialize the map!
 		if err := rows.MapScan(gym); err != nil {
 			log.Warnf("Failed to scan gym: %s", err)
 			continue
@@ -275,8 +274,5 @@ func LoadFortsToRedis(ctx context.Context, db *sqlx.DB, l2Cache *L2Cache) error 
 	duration := time.Since(startTime)
 	log.Infof("Loaded %d gyms to Redis in total time %s", count, duration)
 
-	pokestops = append(pokestops, count)
-
 	return nil
 }
-
