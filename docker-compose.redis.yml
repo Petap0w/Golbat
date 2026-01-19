@@ -6,24 +6,29 @@ services:
     container_name: golbat-redis
     restart: always
     ports:
-      - "6379:6379"
+      - "0.0.0.0:6379:6379"  # For separate VM deployment
     command: >
       redis-server
+      --bind 0.0.0.0
+      --protected-mode no
+      --requirepass YOUR_REDIS_PASSWORD_HERE
       --appendonly yes
       --appendfsync everysec
       --maxmemory 100gb
-      --maxmemory-policy noeviction
-      --save 900 1
-      --save 300 10
-      --save 60 10000
-      --tcp-backlog 511
+      --maxmemory-policy allkeys-lru
+      --save 3600 1
+      --save 1800 100
+      --save 900 1000
+      --tcp-backlog 4096
       --timeout 0
       --tcp-keepalive 300
+      --maxclients 50000
       --loglevel notice
+      --stop-writes-on-bgsave-error no
     volumes:
       - ./redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "YOUR_REDIS_PASSWORD_HERE", "ping"]
       interval: 10s
       timeout: 3s
       retries: 3
@@ -37,7 +42,7 @@ services:
     container_name: golbat-redis-commander
     restart: always
     environment:
-      - REDIS_HOSTS=local:golbat-redis:6379
+      - REDIS_HOSTS=local:golbat-redis:6379:0:YOUR_REDIS_PASSWORD_HERE
     ports:
       - "8081:8081"
     networks:

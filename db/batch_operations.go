@@ -292,5 +292,83 @@ func BatchUpsertStations(ctx context.Context, db *sqlx.DB, stations interface{})
 	return err
 }
 
-// Additional batch operations can be added here for Routes, S2Cells, Players, etc.
+// BatchUpsertRoutes performs batch insert/update for routes
+func BatchUpsertRoutes(ctx context.Context, db *sqlx.DB, routes interface{}) error {
+	query := `INSERT INTO route 
+		(id, name, description, distance_meters, duration_seconds, start_lat, start_lon, 
+		 start_image, end_lat, end_lon, end_image, updated, reversible, tags, route_submission_start_timestamp_ms,
+		 route_submission_end_timestamp_ms, type, version, path, waypoints, image, image_border_color_hex)
+	VALUES
+		(:id, :name, :description, :distance_meters, :duration_seconds, :start_lat, :start_lon,
+		 :start_image, :end_lat, :end_lon, :end_image, :updated, :reversible, :tags, :route_submission_start_timestamp_ms,
+		 :route_submission_end_timestamp_ms, :type, :version, :path, :waypoints, :image, :image_border_color_hex)
+	ON DUPLICATE KEY UPDATE
+		name = VALUES(name),
+		description = VALUES(description),
+		distance_meters = VALUES(distance_meters),
+		duration_seconds = VALUES(duration_seconds),
+		start_lat = VALUES(start_lat),
+		start_lon = VALUES(start_lon),
+		start_image = VALUES(start_image),
+		end_lat = VALUES(end_lat),
+		end_lon = VALUES(end_lon),
+		end_image = VALUES(end_image),
+		updated = VALUES(updated),
+		reversible = VALUES(reversible),
+		tags = VALUES(tags),
+		route_submission_start_timestamp_ms = VALUES(route_submission_start_timestamp_ms),
+		route_submission_end_timestamp_ms = VALUES(route_submission_end_timestamp_ms),
+		type = VALUES(type),
+		version = VALUES(version),
+		path = VALUES(path),
+		waypoints = VALUES(waypoints),
+		image = VALUES(image),
+		image_border_color_hex = VALUES(image_border_color_hex)`
 
+	_, err := db.NamedExecContext(ctx, query, routes)
+	statsCollector.IncDbQuery("batch_upsert_routes", err)
+	return err
+}
+
+// BatchUpsertS2Cells performs batch insert/update for s2cells
+func BatchUpsertS2Cells(ctx context.Context, db *sqlx.DB, cells interface{}) error {
+	query := `INSERT INTO s2cell 
+		(id, level, center_lat, center_lon, updated)
+	VALUES
+		(:id, :level, :center_lat, :center_lon, UNIX_TIMESTAMP())
+	ON DUPLICATE KEY UPDATE
+		level = VALUES(level),
+		center_lat = VALUES(center_lat),
+		center_lon = VALUES(center_lon),
+		updated = VALUES(updated)`
+
+	_, err := db.NamedExecContext(ctx, query, cells)
+	statsCollector.IncDbQuery("batch_upsert_s2cells", err)
+	return err
+}
+
+// BatchUpsertPlayers performs batch insert/update for players
+func BatchUpsertPlayers(ctx context.Context, db *sqlx.DB, players interface{}) error {
+	query := `INSERT INTO trainer 
+		(name, level, team_id, battles_won, km_walked, pokemon_caught, experience, 
+		 pokestops_visited, total_xp, combat_rank, combat_rating, updated)
+	VALUES
+		(:name, :level, :team_id, :battles_won, :km_walked, :pokemon_caught, :experience,
+		 :pokestops_visited, :total_xp, :combat_rank, :combat_rating, UNIX_TIMESTAMP())
+	ON DUPLICATE KEY UPDATE
+		level = VALUES(level),
+		team_id = VALUES(team_id),
+		battles_won = VALUES(battles_won),
+		km_walked = VALUES(km_walked),
+		pokemon_caught = VALUES(pokemon_caught),
+		experience = VALUES(experience),
+		pokestops_visited = VALUES(pokestops_visited),
+		total_xp = VALUES(total_xp),
+		combat_rank = VALUES(combat_rank),
+		combat_rating = VALUES(combat_rating),
+		updated = VALUES(updated)`
+
+	_, err := db.NamedExecContext(ctx, query, players)
+	statsCollector.IncDbQuery("batch_upsert_players", err)
+	return err
+}

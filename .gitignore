@@ -21,6 +21,7 @@ docker-compose.yml
 /logs/*
 /cache/*
 /golbat
+/golbat-writer
 /geojson/*
 vbase.proto
 __debug_bin

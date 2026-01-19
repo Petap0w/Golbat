@@ -44,9 +44,9 @@ func NewClient(cfg *Config) (*Client, error) {
 		MinIdleConns: 10,
 		MaxRetries:   3,
 		DialTimeout:  5 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
-		PoolTimeout:  4 * time.Second,
+		ReadTimeout:  500 * time.Millisecond, // Fast cache reads (1-5ms normal, <50ms during BGSAVE)
+		WriteTimeout: 1 * time.Second,        // Queue writes slightly longer
+		PoolTimeout:  2 * time.Second,        // Connection acquisition timeout
 	}
 
 	client := redis.NewClient(opts)
@@ -85,4 +85,3 @@ func (c *Client) Ping(ctx context.Context) error {
 func (c *Client) IsEnabled() bool {
 	return c.config.Enabled && c.client != nil
 }
-
