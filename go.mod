@@ -25,11 +25,13 @@ require (
 	github.com/paulmach/orb v0.11.1
 	github.com/prometheus/client_golang v1.23.0
 	github.com/puzpuzpuz/xsync/v3 v3.5.1
+	github.com/redis/go-redis/v9 v9.17.2
 	github.com/ringsaturn/tzf v1.0.0
 	github.com/ringsaturn/tzf-rel v0.0.2025-b
 	github.com/sirupsen/logrus v1.9.3
 	github.com/tidwall/rtree v1.10.0
 	github.com/toorop/gin-logrus v0.0.0-20210225092905-2c785434f26f
+	github.com/vmihailenco/msgpack/v5 v5.4.1
 	google.golang.org/grpc v1.74.2
 	google.golang.org/protobuf v1.36.7
 	gopkg.in/guregu/null.v4 v4.0.0
@@ -43,6 +45,7 @@ require (
 	github.com/bytedance/sonic/loader v0.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.9 // indirect
@@ -76,6 +79,7 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/twpayne/go-polyline v1.1.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	go.mongodb.org/mongo-driver v1.17.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/arch v0.20.0 // indirect

@@ -38,13 +38,33 @@ type Spawnpoint struct {
 //)
 
 func getSpawnpointRecord(ctx context.Context, db db.DbDetails, spawnpointId int64) (*Spawnpoint, error) {
+	// L1 cache check
 	inMemorySpawnpoint := spawnpointCache.Get(spawnpointId)
 	if inMemorySpawnpoint != nil {
 		spawnpoint := inMemorySpawnpoint.Value()
 		return &spawnpoint, nil
 	}
-	spawnpoint := Spawnpoint{}
 
+	// L2 cache check (Redis) - using optimized batch loader
+	if redisEnabled && spawnpointBatch != nil {
+		records, err := spawnpointBatch.BatchLoad(ctx, []int64{spawnpointId})
+		if err == nil {
+			if record, found := records[spawnpointId]; found {
+				spawnpoint := &Spawnpoint{
+					Id:         record.Id,
+					Lat:        record.Lat,
+					Lon:        record.Lon,
+					DespawnSec: null.IntFromPtr(&record.DespawnSec),
+					Updated:    record.Updated,
+					LastSeen:   record.LastSeen,
+				}
+				return spawnpoint, nil
+			}
+		}
+	}
+
+	// DB fallback
+	spawnpoint := Spawnpoint{}
 	err := db.GeneralDb.GetContext(ctx, &spawnpoint, "SELECT id, lat, lon, updated, last_seen, despawn_sec FROM spawnpoint WHERE id = ?", spawnpointId)
 
 	statsCollector.IncDbQuery("select spawnpoint", err)
@@ -56,7 +76,13 @@ func getSpawnpointRecord(ctx context.Context, db db.DbDetails, spawnpointId int6
 		return &Spawnpoint{Id: spawnpointId}, err
 	}
 
+	// Populate caches
 	spawnpointCache.Set(spawnpointId, spawnpoint, ttlcache.DefaultTTL)
+	if redisEnabled && l2Cache != nil {
+		l2Cache.SetSpawnpoint(ctx, spawnpoint.Id, spawnpoint.Lat, spawnpoint.Lon,
+			spawnpoint.DespawnSec.ValueOrZero(), spawnpoint.Updated, spawnpoint.LastSeen)
+	}
+
 	return &spawnpoint, nil
 }
 
@@ -132,11 +158,33 @@ func spawnpointUpdate(ctx context.Context, db db.DbDetails, spawnpoint *Spawnpoi
 		return
 	}
 
-	//log.Println(cmp.Diff(oldSpawnpoint, spawnpoint))
+	spawnpoint.Updated = time.Now().Unix()
+	spawnpoint.LastSeen = time.Now().Unix()
 
-	spawnpoint.Updated = time.Now().Unix()  // ensure future updates are set correctly
-	spawnpoint.LastSeen = time.Now().Unix() // ensure future updates are set correctly
+	// Update L1 cache immediately
+	spawnpointCache.Set(spawnpoint.Id, *spawnpoint, ttlcache.DefaultTTL)
 
+	// Update L2 cache immediately (optimized format)
+	if redisEnabled && l2Cache != nil {
+		l2Cache.SetSpawnpoint(ctx, spawnpoint.Id, spawnpoint.Lat, spawnpoint.Lon,
+			spawnpoint.DespawnSec.ValueOrZero(), spawnpoint.Updated, spawnpoint.LastSeen)
+	}
+
+	// Queue write to database
+	if redisEnabled {
+		if err := queueWrite(ctx, "spawnpoint", "upsert", spawnpoint); err != nil {
+			log.Warnf("Failed to queue spawnpoint write for %d: %s", spawnpoint.Id, err)
+			// Fall back to direct DB write
+			spawnpointUpdateDirect(ctx, db, spawnpoint)
+		}
+	} else {
+		// Direct DB write if Redis not enabled
+		spawnpointUpdateDirect(ctx, db, spawnpoint)
+	}
+}
+
+// spawnpointUpdateDirect writes directly to DB (fallback or no-Redis mode)
+func spawnpointUpdateDirect(ctx context.Context, db db.DbDetails, spawnpoint *Spawnpoint) {
 	_, err := db.GeneralDb.NamedExecContext(ctx, "INSERT INTO spawnpoint (id, lat, lon, updated, last_seen, despawn_sec)"+
 		"VALUES (:id, :lat, :lon, :updated, :last_seen, :despawn_sec)"+
 		"ON DUPLICATE KEY UPDATE "+
@@ -149,10 +197,7 @@ func spawnpointUpdate(ctx context.Context, db db.DbDetails, spawnpoint *Spawnpoi
 	statsCollector.IncDbQuery("insert spawnpoint", err)
 	if err != nil {
 		log.Errorf("Error updating spawnpoint %s", err)
-		return
 	}
-
-	spawnpointCache.Set(spawnpoint.Id, *spawnpoint, ttlcache.DefaultTTL)
 }
 
 func spawnpointSeen(ctx context.Context, db db.DbDetails, spawnpointId int64) {
@@ -165,17 +210,42 @@ func spawnpointSeen(ctx context.Context, db db.DbDetails, spawnpointId int64) {
 	spawnpoint := inMemorySpawnpoint.Value()
 	now := time.Now().Unix()
 
-	if now-spawnpoint.LastSeen > 3600 {
+	// Only update last_seen once per day (86400 seconds = 24 hours)
+	// This reduces unnecessary DB writes for active spawnpoints
+	if now-spawnpoint.LastSeen > 86400 {
 		spawnpoint.LastSeen = now
 
-		_, err := db.GeneralDb.ExecContext(ctx, "UPDATE spawnpoint "+
-			"SET last_seen=? "+
-			"WHERE id = ? ", now, spawnpointId)
-		statsCollector.IncDbQuery("update spawnpoint", err)
-		if err != nil {
-			log.Printf("Error updating spawnpoint last seen %s", err)
-			return
+		// Queue write to database if Redis enabled
+		if redisEnabled {
+			// Update cache immediately
+			spawnpointCache.Set(spawnpoint.Id, spawnpoint, ttlcache.DefaultTTL)
+			if l2Cache != nil {
+				l2Cache.SetSpawnpoint(ctx, spawnpoint.Id, spawnpoint.Lat, spawnpoint.Lon,
+					spawnpoint.DespawnSec.ValueOrZero(), spawnpoint.Updated, spawnpoint.LastSeen)
+			}
+
+			// Queue the write
+			if err := queueWrite(ctx, "spawnpoint", "upsert", &spawnpoint); err != nil {
+				log.Warnf("Failed to queue spawnpoint last_seen update: %s", err)
+				// Fall back to direct write
+				spawnpointSeenDirect(ctx, db, now, spawnpointId)
+			}
+		} else {
+			// Direct DB write if Redis not enabled
+			spawnpointSeenDirect(ctx, db, now, spawnpointId)
 		}
+
 		spawnpointCache.Set(spawnpoint.Id, spawnpoint, ttlcache.DefaultTTL)
+	}
+}
+
+// spawnpointSeenDirect performs direct DB update (fallback or no-Redis mode)
+func spawnpointSeenDirect(ctx context.Context, db db.DbDetails, now int64, spawnpointId int64) {
+	_, err := db.GeneralDb.ExecContext(ctx, "UPDATE spawnpoint "+
+		"SET last_seen=? "+
+		"WHERE id = ? ", now, spawnpointId)
+	statsCollector.IncDbQuery("update spawnpoint", err)
+	if err != nil {
+		log.Printf("Error updating spawnpoint last seen %s", err)
 	}
 }

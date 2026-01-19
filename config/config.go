@@ -11,6 +11,7 @@ type configDefinition struct {
 	GrpcPort                       int        `koanf:"grpc_port"`
 	Webhooks                       []Webhook  `koanf:"webhooks"`
 	Database                       database   `koanf:"database"`
+	Redis                          redis      `koanf:"redis"`
 	Logging                        logging    `koanf:"logging"`
 	Sentry                         sentry     `koanf:"sentry"`
 	Pyroscope                      pyroscope  `koanf:"pyroscope"`
@@ -117,6 +118,19 @@ type database struct {
 	Password string `koanf:"password"`
 	Db       string `koanf:"db"`
 	MaxPool  int    `koanf:"max_pool"`
+}
+
+type redis struct {
+	Enabled          bool     `koanf:"enabled"`
+	Addresses        []string `koanf:"addresses"`
+	Password         string   `koanf:"password"`
+	DB               int      `koanf:"db"`
+	PoolSize         int      `koanf:"pool_size"`
+	CacheTTLMinutes  int      `koanf:"cache_ttl_minutes"`
+	MaxQueueSize     int64    `koanf:"max_queue_size"`
+	WriterBatchSize  int      `koanf:"writer_batch_size"`
+	WriterWorkers    int      `koanf:"writer_workers"`
+	LoadHotOnStartup bool     `koanf:"load_hot_on_startup"`
 }
 
 type tuning struct {

@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: golbat-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 100gb
+      --maxmemory-policy noeviction
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --loglevel notice
+    volumes:
+      - ./redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - golbat-network
+
+  # Optional: Redis Commander for web-based Redis management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: golbat-redis-commander
+    restart: always
+    environment:
+      - REDIS_HOSTS=local:golbat-redis:6379
+    ports:
+      - "8081:8081"
+    networks:
+      - golbat-network
+    depends_on:
+      - redis
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  golbat-network:
+    driver: bridge
+

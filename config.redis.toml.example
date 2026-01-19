@@ -1,0 +1,65 @@
+# Redis Configuration for Golbat
+# This configuration enables Redis-based caching and async write queuing
+
+[redis]
+# Enable Redis integration
+enabled = true
+
+# Redis server addresses
+# If running Redis via docker-compose.redis.yml, use localhost:6379
+# If running on separate host, use hostname:6379
+addresses = ["localhost:6379"]
+
+# Redis password (leave empty if no auth)
+password = ""
+
+# Redis database number
+db = 0
+
+# Connection pool size (adjust based on workload)
+# Recommended: 50-100 for high-load scenarios
+pool_size = 100
+
+# Cache TTL in minutes (how long data stays in Redis without updates)
+# Recommended: 120 minutes (2 hours) - balanced approach
+# - Active data refreshes constantly anyway (never expires)
+# - Inactive data expires after 2 hours (frees memory efficiently)
+# - Survives most scanner pauses and short maintenance
+cache_ttl_minutes = 120
+
+# Maximum queue size (protects against memory overflow)
+# With 1M limit, approximately 100MB memory usage
+max_queue_size = 1000000
+
+# Batch size for DB writer workers
+# Each worker processes this many operations per batch
+# Recommended: 300-1000 depending on DB performance
+writer_batch_size = 500
+
+# Number of DB writer workers (within single golbat-writer process)
+# Each worker is a goroutine consuming from Redis Streams
+# Recommended: 4-8 for most workloads, 8-16 for very high load
+writer_workers = 4
+
+# Load hot data into Redis on startup
+# This pre-populates Redis with:
+# - Active spawnpoints (last 7 days) - ~39M records, ~20GB
+# - All pokestops - ~3.5M records, ~7GB
+# - All gyms - ~1M records, ~2GB
+# Total: ~30GB with your scale
+# Takes 3-5 minutes on startup
+# Recommended: true for production
+load_hot_on_startup = true
+
+# ---------------------------------------------------------
+# Maintenance Window Handling
+# ---------------------------------------------------------
+# If you pause scanners for maintenance (e.g., 2 hours):
+# 1. Keep Golbat running → L1 cache preserved
+# 2. Set cache_ttl_minutes = 180+ → Redis survives pause
+# 3. On Golbat restart → load_hot_on_startup reloads cache
+# Result: 3-5 min reload instead of hours ✅
+
+# Example full configuration:
+# Copy the relevant sections to your config.toml
+

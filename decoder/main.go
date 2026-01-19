@@ -94,6 +94,11 @@ func InitProactiveIVSwitchSem() {
 	ProactiveIVSwitchSem = make(chan bool, config.Config.MaxConcurrentProactiveIVSwitch)
 }
 
+// GetSpawnpointCache returns the spawnpoint cache for use by external packages
+func GetSpawnpointCache() *ttlcache.Cache[int64, Spawnpoint] {
+	return spawnpointCache
+}
+
 type gohbemLogger struct{}
 
 func (cl *gohbemLogger) Print(message string) {

@@ -27,6 +27,9 @@ import (
 	"golbat/decoder"
 	"golbat/external"
 	pb "golbat/grpc"
+	"golbat/pkg/cache"
+	"golbat/pkg/queue"
+	golbatRedis "golbat/pkg/redis"
 	"golbat/pogo"
 	"golbat/stats_collector"
 	"golbat/webhooks"
@@ -35,6 +38,9 @@ import (
 var db *sqlx.DB
 var dbDetails db2.DbDetails
 var statsCollector stats_collector.StatsCollector
+var redisClient *golbatRedis.Client
+var writeQueue *queue.WriteQueue
+var l2Cache *cache.L2Cache
 
 func main() {
 	var wg sync.WaitGroup
@@ -129,6 +135,56 @@ func main() {
 		return
 	}
 	log.Infoln("Connected to database")
+
+	// Initialize Redis if enabled
+	if cfg.Redis.Enabled {
+		log.Info("Initializing Redis...")
+		var err error
+		redisClient, err = golbatRedis.NewClient(&golbatRedis.Config{
+			Enabled:   cfg.Redis.Enabled,
+			Addresses: cfg.Redis.Addresses,
+			Password:  cfg.Redis.Password,
+			DB:        cfg.Redis.DB,
+			PoolSize:  cfg.Redis.PoolSize,
+		})
+		if err != nil {
+			log.Fatalf("Failed to connect to Redis: %s", err)
+		}
+
+		// Initialize L2 cache
+		l2Cache = cache.NewL2Cache(redisClient.GetClient(), cfg.Redis.CacheTTLMinutes)
+		log.Info("L2 cache initialized")
+
+		// Initialize write queue
+		writeQueue = queue.NewWriteQueue(redisClient.GetClient(), cfg.Redis.MaxQueueSize)
+		log.Info("Write queue initialized")
+
+		// Initialize spawnpoint batch loader
+		spawnpointLoader := cache.NewSpawnpointLoader(l2Cache, db)
+		
+		// Initialize decoder with Redis components
+		decoder.InitRedis(l2Cache, writeQueue, spawnpointLoader)
+		log.Info("Decoder Redis bridge initialized")
+
+		// Load hot data into Redis if configured
+		if cfg.Redis.LoadHotOnStartup {
+			log.Info("Loading hot data into Redis...")
+			
+			// Load hot spawnpoints (last 7 days)
+			if err := spawnpointLoader.LoadHotSpawnpointsOnStartup(ctx); err != nil {
+				log.Errorf("Failed to load hot spawnpoints: %s", err)
+			}
+
+			// Load pokestops and gyms
+			if err := cache.LoadFortsToRedis(ctx, db, l2Cache); err != nil {
+				log.Errorf("Failed to load forts to Redis: %s", err)
+			}
+
+			log.Info("Hot data loaded into Redis")
+		}
+	} else {
+		log.Info("Redis disabled, using direct DB mode")
+	}
 
 	decoder.SetKojiUrl(cfg.Koji.Url, cfg.Koji.BearerToken)
 
@@ -380,6 +436,22 @@ func main() {
 	// webhooks and exit the program.
 	log.Info("http server is shutdown, waiting for other go routines to exit...")
 	wg.Wait()
+
+	// Flush Redis write queue before shutdown
+	if writeQueue != nil {
+		log.Info("Flushing Redis write queue...")
+		if err := writeQueue.Flush(ctx); err != nil {
+			log.Warnf("Failed to flush write queue: %s", err)
+		}
+	}
+
+	// Close Redis connection
+	if redisClient != nil {
+		log.Info("Closing Redis connection...")
+		if err := redisClient.Close(); err != nil {
+			log.Warnf("Failed to close Redis: %s", err)
+		}
+	}
 
 	log.Info("go routines have exited, flushing webhooks now...")
 	webhooksSender.Flush()

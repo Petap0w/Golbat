@@ -109,12 +109,29 @@ type Pokestop struct {
 }
 
 func GetPokestopRecord(ctx context.Context, db db.DbDetails, fortId string) (*Pokestop, error) {
+	// L1 cache check
 	stop := pokestopCache.Get(fortId)
 	if stop != nil {
 		pokestop := stop.Value()
-		//log.Debugf("GetPokestopRecord %s (from cache)", fortId)
 		return &pokestop, nil
 	}
+
+	// L2 cache check (Redis)
+	if redisEnabled {
+		var pokestop Pokestop
+		cacheKey := fmt.Sprintf("pokestop:%s", fortId)
+		err := getFromL2Cache(ctx, cacheKey, &pokestop)
+		if err == nil {
+			// Found in L2, populate L1
+			pokestopCache.Set(fortId, pokestop, ttlcache.DefaultTTL)
+			if config.Config.TestFortInMemory {
+				fortRtreeUpdatePokestopOnGet(&pokestop)
+			}
+			return &pokestop, nil
+		}
+	}
+
+	// DB fallback
 	pokestop := Pokestop{}
 	err := db.GeneralDb.GetContext(ctx, &pokestop,
 		`SELECT pokestop.id, lat, lon, name, url, enabled, lure_expire_timestamp, last_modified_timestamp,
@@ -128,7 +145,6 @@ func GetPokestopRecord(ctx context.Context, db db.DbDetails, fortId string) (*Po
 			showcase_pokemon_type_id, showcase_ranking_standard, showcase_expiry, showcase_rankings
 			FROM pokestop
 			WHERE pokestop.id = ? `, fortId)
-	//log.Debugf("GetPokestopRecord %s (from db)", fortId)
 
 	statsCollector.IncDbQuery("select pokestop", err)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -138,7 +154,12 @@ func GetPokestopRecord(ctx context.Context, db db.DbDetails, fortId string) (*Po
 		return nil, err
 	}
 
+	// Populate caches
 	pokestopCache.Set(fortId, pokestop, ttlcache.DefaultTTL)
+	if redisEnabled {
+		cacheKey := fmt.Sprintf("pokestop:%s", fortId)
+		setToL2Cache(ctx, cacheKey, pokestop)
+	}
 	if config.Config.TestFortInMemory {
 		fortRtreeUpdatePokestopOnGet(&pokestop)
 	}
@@ -766,8 +787,32 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 	}
 	pokestop.Updated = now
 
-	//log.Traceln(cmp.Diff(oldPokestop, pokestop))
+	// Update L1 cache immediately for read consistency
+	pokestopCache.Set(pokestop.Id, *pokestop, ttlcache.DefaultTTL)
 
+	// Update L2 cache immediately
+	if redisEnabled {
+		cacheKey := fmt.Sprintf("pokestop:%s", pokestop.Id)
+		setToL2Cache(ctx, cacheKey, pokestop)
+	}
+
+	// Queue write to database
+	if redisEnabled {
+		if err := queueWrite(ctx, "pokestop", "upsert", pokestop); err != nil {
+			log.Warnf("Failed to queue pokestop write for %s: %s", pokestop.Id, err)
+			// Fall back to direct DB write
+			savePokestopRecordDirect(ctx, db, pokestop, oldPokestop)
+		}
+	} else {
+		// Direct DB write if Redis not enabled
+		savePokestopRecordDirect(ctx, db, pokestop, oldPokestop)
+	}
+
+	createPokestopWebhooks(oldPokestop, pokestop)
+}
+
+// savePokestopRecordDirect writes directly to DB (fallback or no-Redis mode)
+func savePokestopRecordDirect(ctx context.Context, db db.DbDetails, pokestop *Pokestop, oldPokestop *Pokestop) {
 	if oldPokestop == nil {
 		res, err := db.GeneralDb.NamedExecContext(ctx, `
 			INSERT INTO pokestop (
@@ -793,7 +838,6 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 			pokestop)
 
 		statsCollector.IncDbQuery("insert pokestop", err)
-		//log.Debugf("Insert pokestop %s %+v", pokestop.Id, pokestop)
 		if err != nil {
 			log.Errorf("insert pokestop %s: %s", pokestop.Id, err)
 			return
@@ -847,16 +891,12 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 			pokestop,
 		)
 		statsCollector.IncDbQuery("update pokestop", err)
-		//log.Debugf("Update pokestop %s %+v", pokestop.Id, pokestop)
 		if err != nil {
 			log.Errorf("update pokestop %s: %s", pokestop.Id, err)
 			return
 		}
 		_ = res
 	}
-	pokestopCache.Set(pokestop.Id, *pokestop, ttlcache.DefaultTTL)
-	createPokestopWebhooks(oldPokestop, pokestop)
-	createPokestopFortWebhooks(oldPokestop, pokestop)
 }
 
 func updatePokestopGetMapFortCache(pokestop *Pokestop) {

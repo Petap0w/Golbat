@@ -116,11 +116,29 @@ type Gym struct {
 //WHERE table_schema = 'db_name' AND table_name = 'tbl_name'
 
 func GetGymRecord(ctx context.Context, db db.DbDetails, fortId string) (*Gym, error) {
+	// L1 cache check
 	inMemoryGym := gymCache.Get(fortId)
 	if inMemoryGym != nil {
 		gym := inMemoryGym.Value()
 		return &gym, nil
 	}
+
+	// L2 cache check (Redis)
+	if redisEnabled {
+		var gym Gym
+		cacheKey := fmt.Sprintf("gym:%s", fortId)
+		err := getFromL2Cache(ctx, cacheKey, &gym)
+		if err == nil {
+			// Found in L2, populate L1
+			gymCache.Set(fortId, gym, ttlcache.DefaultTTL)
+			if config.Config.TestFortInMemory {
+				fortRtreeUpdateGymOnGet(&gym)
+			}
+			return &gym, nil
+		}
+	}
+
+	// DB fallback
 	gym := Gym{}
 	err := db.GeneralDb.GetContext(ctx, &gym, "SELECT id, lat, lon, name, url, last_modified_timestamp, raid_end_timestamp, raid_spawn_timestamp, raid_battle_timestamp, updated, raid_pokemon_id, guarding_pokemon_id, guarding_pokemon_display, available_slots, team_id, raid_level, enabled, ex_raid_eligible, in_battle, raid_pokemon_move_1, raid_pokemon_move_2, raid_pokemon_form, raid_pokemon_alignment, raid_pokemon_cp, raid_is_exclusive, cell_id, deleted, total_cp, first_seen_timestamp, raid_pokemon_gender, sponsor_id, partner_id, raid_pokemon_costume, raid_pokemon_evolution, ar_scan_eligible, power_up_level, power_up_points, power_up_end_timestamp, description, defenders, rsvps FROM gym WHERE id = ?", fortId)
 
@@ -133,7 +151,12 @@ func GetGymRecord(ctx context.Context, db db.DbDetails, fortId string) (*Gym, er
 		return nil, err
 	}
 
+	// Populate caches
 	gymCache.Set(fortId, gym, ttlcache.DefaultTTL)
+	if redisEnabled {
+		cacheKey := fmt.Sprintf("gym:%s", fortId)
+		setToL2Cache(ctx, cacheKey, gym)
+	}
 	if config.Config.TestFortInMemory {
 		fortRtreeUpdateGymOnGet(&gym)
 	}
@@ -648,7 +671,34 @@ func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
 
 	gym.Updated = now
 
-	//log.Traceln(cmp.Diff(oldGym, gym))
+	// Update L1 cache immediately for read consistency
+	gymCache.Set(gym.Id, *gym, ttlcache.DefaultTTL)
+
+	// Update L2 cache immediately
+	if redisEnabled {
+		cacheKey := fmt.Sprintf("gym:%s", gym.Id)
+		setToL2Cache(ctx, cacheKey, gym)
+	}
+
+	// Queue write to database
+	if redisEnabled {
+		if err := queueWrite(ctx, "gym", "upsert", gym); err != nil {
+			log.Warnf("Failed to queue gym write for %s: %s", gym.Id, err)
+			// Fall back to direct DB write
+			saveGymRecordDirect(ctx, db, gym, oldGym)
+		}
+	} else {
+		// Direct DB write if Redis not enabled
+		saveGymRecordDirect(ctx, db, gym, oldGym)
+	}
+
+	areas := MatchStatsGeofence(gym.Lat, gym.Lon)
+	createGymWebhooks(oldGym, gym, areas)
+	createGymFortWebhooks(oldGym, gym)
+}
+
+// saveGymRecordDirect writes directly to DB (fallback or no-Redis mode)
+func saveGymRecordDirect(ctx context.Context, db db.DbDetails, gym *Gym, oldGym *Gym) {
 	if oldGym == nil {
 		res, err := db.GeneralDb.NamedExecContext(ctx, "INSERT INTO gym (id,lat,lon,name,url,last_modified_timestamp,raid_end_timestamp,raid_spawn_timestamp,raid_battle_timestamp,updated,raid_pokemon_id,guarding_pokemon_id,guarding_pokemon_display,available_slots,team_id,raid_level,enabled,ex_raid_eligible,in_battle,raid_pokemon_move_1,raid_pokemon_move_2,raid_pokemon_form,raid_pokemon_alignment,raid_pokemon_cp,raid_is_exclusive,cell_id,deleted,total_cp,first_seen_timestamp,raid_pokemon_gender,sponsor_id,partner_id,raid_pokemon_costume,raid_pokemon_evolution,ar_scan_eligible,power_up_level,power_up_points,power_up_end_timestamp,description, defenders, rsvps) "+
 			"VALUES (:id,:lat,:lon,:name,:url,UNIX_TIMESTAMP(),:raid_end_timestamp,:raid_spawn_timestamp,:raid_battle_timestamp,:updated,:raid_pokemon_id,:guarding_pokemon_id,:guarding_pokemon_display,:available_slots,:team_id,:raid_level,:enabled,:ex_raid_eligible,:in_battle,:raid_pokemon_move_1,:raid_pokemon_move_2,:raid_pokemon_form,:raid_pokemon_alignment,:raid_pokemon_cp,:raid_is_exclusive,:cell_id,0,:total_cp,UNIX_TIMESTAMP(),:raid_pokemon_gender,:sponsor_id,:partner_id,:raid_pokemon_costume,:raid_pokemon_evolution,:ar_scan_eligible,:power_up_level,:power_up_points,:power_up_end_timestamp,:description, :defenders, :rsvps)", gym)
@@ -709,12 +759,6 @@ func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
 		}
 		_, _ = res, err
 	}
-
-	gymCache.Set(gym.Id, *gym, ttlcache.DefaultTTL)
-	areas := MatchStatsGeofence(gym.Lat, gym.Lon)
-	createGymWebhooks(oldGym, gym, areas)
-	createGymFortWebhooks(oldGym, gym)
-	updateRaidStats(oldGym, gym, areas)
 }
 
 func updateGymGetMapFortCache(gym *Gym, skipName bool) {
