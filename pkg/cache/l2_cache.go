@@ -218,3 +218,26 @@ type SpawnpointData struct {
 
 var ErrCacheMiss = fmt.Errorf("cache miss")
 
+// GetAllKeys returns all keys matching a pattern (for FortTracker initialization)
+func (c *L2Cache) GetAllKeys(ctx context.Context, pattern string) ([]string, error) {
+	var keys []string
+	var cursor uint64
+	
+	for {
+		var scanKeys []string
+		var err error
+		scanKeys, cursor, err = c.client.Scan(ctx, cursor, pattern, 10000).Result()
+		if err != nil {
+			return nil, err
+		}
+		
+		keys = append(keys, scanKeys...)
+		
+		if cursor == 0 {
+			break
+		}
+	}
+	
+	return keys, nil
+}
+

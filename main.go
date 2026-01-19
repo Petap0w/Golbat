@@ -314,8 +314,16 @@ func main() {
 		staleThreshold = 3600 // def 1 hour
 	}
 	decoder.InitFortTracker(staleThreshold)
-	if err := decoder.LoadFortsFromDB(ctx, dbDetails); err != nil {
-		log.Errorf("failed to load forts into tracker: %s", err)
+	
+	// Load forts into tracker - use Redis if available, otherwise DB
+	if cfg.Redis.Enabled && cfg.Redis.LoadHotOnStartup {
+		if err := decoder.LoadFortsFromRedis(ctx); err != nil {
+			log.Errorf("failed to load forts from Redis into tracker: %s", err)
+		}
+	} else {
+		if err := decoder.LoadFortsFromDB(ctx, dbDetails); err != nil {
+			log.Errorf("failed to load forts from DB into tracker: %s", err)
+		}
 	}
 
 	if cfg.TestFortInMemory {

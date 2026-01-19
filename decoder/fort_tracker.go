@@ -58,7 +58,37 @@ func InitFortTracker(staleThresholdSeconds int64) {
 	log.Infof("FortTracker: initialized with stale threshold of %d seconds", staleThresholdSeconds)
 }
 
-// LoadFortsFromDB populates the tracker from database on startup
+// LoadFortsFromRedis populates the tracker from Redis on startup
+func LoadFortsFromRedis(ctx context.Context) error {
+	if fortTracker == nil {
+		return nil
+	}
+
+	if !IsRedisEnabled() || l2Cache == nil {
+		log.Warn("FortTracker: Redis not available, skipping fort tracker load")
+		return nil
+	}
+
+	startTime := time.Now()
+
+	// Load from Redis cache which was just populated
+	pokestopCount, err := loadPokestopsFromRedis(ctx)
+	if err != nil {
+		return err
+	}
+
+	gymCount, err := loadGymsFromRedis(ctx)
+	if err != nil {
+		return err
+	}
+
+	log.Infof("FortTracker: loaded %d pokestops and %d gyms from Redis in %v",
+		pokestopCount, gymCount, time.Since(startTime))
+
+	return nil
+}
+
+// LoadFortsFromDB populates the tracker from database (fallback if Redis unavailable)
 func LoadFortsFromDB(ctx context.Context, dbDetails db.DbDetails) error {
 	if fortTracker == nil {
 		return nil
@@ -85,6 +115,82 @@ func LoadFortsFromDB(ctx context.Context, dbDetails db.DbDetails) error {
 }
 
 const loadBatchSize = 30000
+
+// loadPokestopsFromRedis loads pokestops from Redis cache
+func loadPokestopsFromRedis(ctx context.Context) (int, error) {
+	// Get all pokestop keys from Redis
+	keys, err := l2Cache.GetAllKeys(ctx, "pokestop:*")
+	if err != nil {
+		log.Errorf("FortTracker: failed to get pokestop keys from Redis - %s", err)
+		return 0, err
+	}
+
+	var totalCount int
+	fortTracker.mu.Lock()
+	defer fortTracker.mu.Unlock()
+
+	for _, key := range keys {
+		// Get pokestop from Redis
+		var pokestop Pokestop
+		if err := l2Cache.Get(ctx, key, &pokestop); err != nil {
+			continue // Skip on error
+		}
+
+		if !pokestop.CellId.Valid || pokestop.CellId.Int64 == 0 {
+			continue // Skip if no cell_id
+		}
+
+		cellId := uint64(pokestop.CellId.Int64)
+		cell := fortTracker.getOrCreateCellLocked(cellId)
+		cell.pokestops[pokestop.Id] = struct{}{}
+		fortTracker.forts[pokestop.Id] = &FortInfo{
+			cellId:   cellId,
+			lastSeen: pokestop.Updated * 1000, // convert to milliseconds
+			isGym:    false,
+		}
+		totalCount++
+	}
+
+	return totalCount, nil
+}
+
+// loadGymsFromRedis loads gyms from Redis cache
+func loadGymsFromRedis(ctx context.Context) (int, error) {
+	// Get all gym keys from Redis
+	keys, err := l2Cache.GetAllKeys(ctx, "gym:*")
+	if err != nil {
+		log.Errorf("FortTracker: failed to get gym keys from Redis - %s", err)
+		return 0, err
+	}
+
+	var totalCount int
+	fortTracker.mu.Lock()
+	defer fortTracker.mu.Unlock()
+
+	for _, key := range keys {
+		// Get gym from Redis
+		var gym Gym
+		if err := l2Cache.Get(ctx, key, &gym); err != nil {
+			continue // Skip on error
+		}
+
+		if !gym.CellId.Valid || gym.CellId.Int64 == 0 {
+			continue // Skip if no cell_id
+		}
+
+		cellId := uint64(gym.CellId.Int64)
+		cell := fortTracker.getOrCreateCellLocked(cellId)
+		cell.gyms[gym.Id] = struct{}{}
+		fortTracker.forts[gym.Id] = &FortInfo{
+			cellId:   cellId,
+			lastSeen: gym.Updated * 1000, // convert to milliseconds
+			isGym:    true,
+		}
+		totalCount++
+	}
+
+	return totalCount, nil
+}
 
 func loadPokestopsFromDB(ctx context.Context, dbDetails db.DbDetails) (int, error) {
 	type pokestopRow struct {
