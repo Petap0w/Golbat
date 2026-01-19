@@ -72,7 +72,9 @@ func BatchUpsertPokestops(ctx context.Context, db *sqlx.DB, pokestops interface{
 		showcase_focus = VALUES(showcase_focus)`
 
 	_, err := db.NamedExecContext(ctx, query, pokestops)
-	statsCollector.IncDbQuery("batch_upsert_pokestops", err)
+	if statsCollector != nil {
+		statsCollector.IncDbQuery("batch_upsert_pokestops", err)
+	}
 	return err
 }
 
@@ -138,7 +140,9 @@ func BatchUpsertGyms(ctx context.Context, db *sqlx.DB, gyms interface{}) error {
 		rsvps = VALUES(rsvps)`
 
 	_, err := db.NamedExecContext(ctx, query, gyms)
-	statsCollector.IncDbQuery("batch_upsert_gyms", err)
+	if statsCollector != nil {
+		statsCollector.IncDbQuery("batch_upsert_gyms", err)
+	}
 	return err
 }
 
@@ -156,7 +160,9 @@ func BatchUpsertSpawnpoints(ctx context.Context, db *sqlx.DB, spawnpoints interf
 		despawn_sec = VALUES(despawn_sec)`
 
 	_, err := db.NamedExecContext(ctx, query, spawnpoints)
-	statsCollector.IncDbQuery("batch_upsert_spawnpoints", err)
+	if statsCollector != nil {
+		statsCollector.IncDbQuery("batch_upsert_spawnpoints", err)
+	}
 	return err
 }
 
@@ -186,7 +192,9 @@ func BatchUpsertIncidents(ctx context.Context, db *sqlx.DB, incidents interface{
 		slot_3_form = VALUES(slot_3_form)`
 
 	_, err := db.NamedExecContext(ctx, query, incidents)
-	statsCollector.IncDbQuery("batch_upsert_incidents", err)
+	if statsCollector != nil {
+		statsCollector.IncDbQuery("batch_upsert_incidents", err)
+	}
 	return err
 }
 
@@ -212,7 +220,9 @@ func BatchUpsertTappables(ctx context.Context, db *sqlx.DB, tappables interface{
 		updated = VALUES(updated)`
 
 	_, err := db.NamedExecContext(ctx, query, tappables)
-	statsCollector.IncDbQuery("batch_upsert_tappables", err)
+	if statsCollector != nil {
+		statsCollector.IncDbQuery("batch_upsert_tappables", err)
+	}
 	return err
 }
 
@@ -241,7 +251,9 @@ func BatchUpsertWeather(ctx context.Context, db *sqlx.DB, weather interface{}) e
 		updated = VALUES(updated)`
 
 	_, err := db.NamedExecContext(ctx, query, weather)
-	statsCollector.IncDbQuery("batch_upsert_weather", err)
+	if statsCollector != nil {
+		statsCollector.IncDbQuery("batch_upsert_weather", err)
+	}
 	return err
 }
 
@@ -288,7 +300,9 @@ func BatchUpsertStations(ctx context.Context, db *sqlx.DB, stations interface{})
 		stationed_pokemon = VALUES(stationed_pokemon)`
 
 	_, err := db.NamedExecContext(ctx, query, stations)
-	statsCollector.IncDbQuery("batch_upsert_stations", err)
+	if statsCollector != nil {
+		statsCollector.IncDbQuery("batch_upsert_stations", err)
+	}
 	return err
 }
 
@@ -326,7 +340,9 @@ func BatchUpsertRoutes(ctx context.Context, db *sqlx.DB, routes interface{}) err
 		image_border_color_hex = VALUES(image_border_color_hex)`
 
 	_, err := db.NamedExecContext(ctx, query, routes)
-	statsCollector.IncDbQuery("batch_upsert_routes", err)
+	if statsCollector != nil {
+		statsCollector.IncDbQuery("batch_upsert_routes", err)
+	}
 	return err
 }
 
@@ -343,7 +359,9 @@ func BatchUpsertS2Cells(ctx context.Context, db *sqlx.DB, cells interface{}) err
 		updated = VALUES(updated)`
 
 	_, err := db.NamedExecContext(ctx, query, cells)
-	statsCollector.IncDbQuery("batch_upsert_s2cells", err)
+	if statsCollector != nil {
+		statsCollector.IncDbQuery("batch_upsert_s2cells", err)
+	}
 	return err
 }
 
@@ -369,6 +387,8 @@ func BatchUpsertPlayers(ctx context.Context, db *sqlx.DB, players interface{}) e
 		updated = VALUES(updated)`
 
 	_, err := db.NamedExecContext(ctx, query, players)
-	statsCollector.IncDbQuery("batch_upsert_players", err)
+	if statsCollector != nil {
+		statsCollector.IncDbQuery("batch_upsert_players", err)
+	}
 	return err
 }
