@@ -32,7 +32,7 @@ func NewDBWriter(redis *redis.Client, db *sqlx.DB, consumerName string, batchSiz
 	return &DBWriter{
 		redis:         redis,
 		db:            db,
-		consumerGroup: "db_writers",
+		consumerGroup: "golbat-writers",
 		consumerName:  consumerName,
 		batchSize:     int64(batchSize),
 		streams: []string{
