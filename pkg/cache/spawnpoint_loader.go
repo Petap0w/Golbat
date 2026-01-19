@@ -208,13 +208,25 @@ func LoadFortsToRedis(ctx context.Context, db *sqlx.DB, l2Cache *L2Cache) error 
 	count := 0
 	batch := make(map[string]interface{})
 	for rows.Next() {
-		pokestop := make(map[string]interface{}) // Initialize the map!
+		pokestop := make(map[string]interface{})
 		if err := rows.MapScan(pokestop); err != nil {
 			log.Warnf("Failed to scan pokestop: %s", err)
 			continue
 		}
 
-		if id, ok := pokestop["id"].(string); ok {
+		// Handle both string and []byte types from MySQL
+		var id string
+		switch v := pokestop["id"].(type) {
+		case string:
+			id = v
+		case []byte:
+			id = string(v)
+		default:
+			log.Debugf("Unexpected type for pokestop ID: %T", pokestop["id"])
+			continue
+		}
+
+		if id != "" {
 			batch[fmt.Sprintf("pokestop:%s", id)] = pokestop
 			count++
 
@@ -246,13 +258,25 @@ func LoadFortsToRedis(ctx context.Context, db *sqlx.DB, l2Cache *L2Cache) error 
 	count = 0
 	batch = make(map[string]interface{})
 	for rows.Next() {
-		gym := make(map[string]interface{}) // Initialize the map!
+		gym := make(map[string]interface{})
 		if err := rows.MapScan(gym); err != nil {
 			log.Warnf("Failed to scan gym: %s", err)
 			continue
 		}
 
-		if id, ok := gym["id"].(string); ok {
+		// Handle both string and []byte types from MySQL
+		var id string
+		switch v := gym["id"].(type) {
+		case string:
+			id = v
+		case []byte:
+			id = string(v)
+		default:
+			log.Debugf("Unexpected type for gym ID: %T", gym["id"])
+			continue
+		}
+
+		if id != "" {
 			batch[fmt.Sprintf("gym:%s", id)] = gym
 			count++
 
