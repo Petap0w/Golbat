@@ -70,8 +70,7 @@ func (w *DBWriter) Run(ctx context.Context) error {
 			}
 		}
 
-		// Small delay to prevent tight loop
-		time.Sleep(100 * time.Millisecond)
+		// No sleep needed - Block parameter in XReadGroup prevents tight loop
 	}
 }
 
@@ -81,7 +80,7 @@ func (w *DBWriter) processStream(ctx context.Context, stream string) error {
 		Consumer: w.consumerName,
 		Streams:  []string{stream, ">"},
 		Count:    w.batchSize,
-		Block:    time.Second,
+		Block:    50 * time.Millisecond, // Reduced from 1 second for faster response
 	}).Result()
 
 	if err == redis.Nil {

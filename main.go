@@ -161,7 +161,7 @@ func main() {
 
 		// Initialize spawnpoint batch loader
 		spawnpointLoader := cache.NewSpawnpointLoader(l2Cache, db)
-		
+
 		// Initialize decoder with Redis components
 		decoder.InitRedis(l2Cache, writeQueue, spawnpointLoader)
 		log.Info("Decoder Redis bridge initialized")
@@ -169,7 +169,7 @@ func main() {
 		// Load hot data into Redis if configured
 		if cfg.Redis.LoadHotOnStartup {
 			log.Info("Loading hot data into Redis...")
-			
+
 			// Load hot spawnpoints (last 7 days)
 			if err := spawnpointLoader.LoadHotSpawnpointsOnStartup(ctx); err != nil {
 				log.Errorf("Failed to load hot spawnpoints: %s", err)
@@ -314,7 +314,7 @@ func main() {
 		staleThreshold = 3600 // def 1 hour
 	}
 	decoder.InitFortTracker(staleThreshold)
-	
+
 	// Load forts into tracker
 	// Note: FortTracker only needs (id, cell_id, updated) - not full records
 	// Loading from DB with specific columns is faster than scanning 1.6M Redis keys
