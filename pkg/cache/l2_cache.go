@@ -117,10 +117,15 @@ func (c *L2Cache) BatchGetSpawnpoints(ctx context.Context, ids []int64) (map[int
 				updated, _ := strconv.ParseInt(parts[3], 10, 64)
 				lastSeen, _ := strconv.ParseInt(parts[4], 10, 64)
 
+				var despawnSecPtr *int64
+				if despawnSec != -1 { // -1 indicates NULL
+					despawnSecPtr = &despawnSec
+				}
+
 				result[ids[i]] = SpawnpointData{
 					Lat:        lat,
 					Lon:        lon,
-					DespawnSec: despawnSec,
+					DespawnSec: despawnSecPtr,
 					Updated:    updated,
 					LastSeen:   lastSeen,
 				}
@@ -138,7 +143,11 @@ func (c *L2Cache) BatchSetSpawnpoints(ctx context.Context, spawnpoints map[int64
 
 	pipe := c.client.Pipeline()
 	for id, sp := range spawnpoints {
-		value := fmt.Sprintf("%.6f,%.6f,%d,%d,%d", sp.Lat, sp.Lon, sp.DespawnSec, sp.Updated, sp.LastSeen)
+		despawnSec := int64(-1) // -1 indicates NULL
+		if sp.DespawnSec != nil {
+			despawnSec = *sp.DespawnSec
+		}
+		value := fmt.Sprintf("%.6f,%.6f,%d,%d,%d", sp.Lat, sp.Lon, despawnSec, sp.Updated, sp.LastSeen)
 		pipe.HSet(ctx, "spawnpoints", strconv.FormatInt(id, 10), value)
 	}
 
@@ -202,7 +211,7 @@ func (c *L2Cache) BatchSet(ctx context.Context, items map[string]interface{}) er
 type SpawnpointData struct {
 	Lat        float64
 	Lon        float64
-	DespawnSec int64
+	DespawnSec *int64 // Nullable
 	Updated    int64
 	LastSeen   int64
 }

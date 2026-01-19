@@ -22,7 +22,7 @@ type SpawnpointRecord struct {
 	Id         int64   `db:"id"`
 	Lat        float64 `db:"lat"`
 	Lon        float64 `db:"lon"`
-	DespawnSec int64   `db:"despawn_sec"`
+	DespawnSec *int64  `db:"despawn_sec"` // Nullable
 	Updated    int64   `db:"updated"`
 	LastSeen   int64   `db:"last_seen"`
 }

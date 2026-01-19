@@ -50,14 +50,14 @@ func getSpawnpointRecord(ctx context.Context, db db.DbDetails, spawnpointId int6
 		records, err := spawnpointBatch.BatchLoad(ctx, []int64{spawnpointId})
 		if err == nil {
 			if record, found := records[spawnpointId]; found {
-				spawnpoint := &Spawnpoint{
-					Id:         record.Id,
-					Lat:        record.Lat,
-					Lon:        record.Lon,
-					DespawnSec: null.IntFromPtr(&record.DespawnSec),
-					Updated:    record.Updated,
-					LastSeen:   record.LastSeen,
-				}
+			spawnpoint := &Spawnpoint{
+				Id:         record.Id,
+				Lat:        record.Lat,
+				Lon:        record.Lon,
+				DespawnSec: null.IntFromPtr(record.DespawnSec),
+				Updated:    record.Updated,
+				LastSeen:   record.LastSeen,
+			}
 				return spawnpoint, nil
 			}
 		}

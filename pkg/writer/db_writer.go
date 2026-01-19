@@ -2,6 +2,7 @@ package writer
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -193,6 +194,37 @@ type OperationData struct {
 	MessageID string
 }
 
+// isDeadlock checks if an error is a MySQL deadlock error
+func isDeadlock(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "Error 1213") || strings.Contains(err.Error(), "Deadlock")
+}
+
+// retryOnDeadlock retries a function on deadlock errors
+func retryOnDeadlock(ctx context.Context, maxRetries int, fn func() error) error {
+	var err error
+	for i := 0; i < maxRetries; i++ {
+		err = fn()
+		if err == nil {
+			return nil
+		}
+		
+		if !isDeadlock(err) {
+			return err
+		}
+		
+		// Exponential backoff on deadlock
+		if i < maxRetries-1 {
+			backoff := time.Duration(10*(i+1)) * time.Millisecond
+			log.Debugf("Deadlock detected, retrying in %v (attempt %d/%d)", backoff, i+1, maxRetries)
+			time.Sleep(backoff)
+		}
+	}
+	return err
+}
+
 // Placeholder processor functions - will be implemented with actual batch logic
 
 func (w *DBWriter) processPokestops(ctx context.Context, ops []OperationData) ([]string, error) {
@@ -215,9 +247,12 @@ func (w *DBWriter) processPokestops(ctx context.Context, ops []OperationData) ([
 		return nil, nil
 	}
 
-	// Use batch insert
-	if err := db.BatchUpsertPokestops(ctx, w.db, pokestops); err != nil {
-		log.Errorf("Failed to batch upsert pokestops: %s", err)
+	// Use batch insert with retry on deadlock
+	err := retryOnDeadlock(ctx, 3, func() error {
+		return db.BatchUpsertPokestops(ctx, w.db, pokestops)
+	})
+	if err != nil {
+		log.Errorf("Failed to batch upsert pokestops after retries: %s", err)
 		return nil, err
 	}
 
@@ -250,8 +285,11 @@ func (w *DBWriter) processGyms(ctx context.Context, ops []OperationData) ([]stri
 		return nil, nil
 	}
 
-	if err := db.BatchUpsertGyms(ctx, w.db, gyms); err != nil {
-		log.Errorf("Failed to batch upsert gyms: %s", err)
+	err := retryOnDeadlock(ctx, 3, func() error {
+		return db.BatchUpsertGyms(ctx, w.db, gyms)
+	})
+	if err != nil {
+		log.Errorf("Failed to batch upsert gyms after retries: %s", err)
 		return nil, err
 	}
 
@@ -283,8 +321,11 @@ func (w *DBWriter) processSpawnpoints(ctx context.Context, ops []OperationData) 
 		return nil, nil
 	}
 
-	if err := db.BatchUpsertSpawnpoints(ctx, w.db, spawnpoints); err != nil {
-		log.Errorf("Failed to batch upsert spawnpoints: %s", err)
+	err := retryOnDeadlock(ctx, 3, func() error {
+		return db.BatchUpsertSpawnpoints(ctx, w.db, spawnpoints)
+	})
+	if err != nil {
+		log.Errorf("Failed to batch upsert spawnpoints after retries: %s", err)
 		return nil, err
 	}
 
@@ -316,8 +357,11 @@ func (w *DBWriter) processIncidents(ctx context.Context, ops []OperationData) ([
 		return nil, nil
 	}
 
-	if err := db.BatchUpsertIncidents(ctx, w.db, incidents); err != nil {
-		log.Errorf("Failed to batch upsert incidents: %s", err)
+	err := retryOnDeadlock(ctx, 3, func() error {
+		return db.BatchUpsertIncidents(ctx, w.db, incidents)
+	})
+	if err != nil {
+		log.Errorf("Failed to batch upsert incidents after retries: %s", err)
 		return nil, err
 	}
 
@@ -349,8 +393,11 @@ func (w *DBWriter) processTappables(ctx context.Context, ops []OperationData) ([
 		return nil, nil
 	}
 
-	if err := db.BatchUpsertTappables(ctx, w.db, tappables); err != nil {
-		log.Errorf("Failed to batch upsert tappables: %s", err)
+	err := retryOnDeadlock(ctx, 3, func() error {
+		return db.BatchUpsertTappables(ctx, w.db, tappables)
+	})
+	if err != nil {
+		log.Errorf("Failed to batch upsert tappables after retries: %s", err)
 		return nil, err
 	}
 
@@ -382,8 +429,11 @@ func (w *DBWriter) processWeather(ctx context.Context, ops []OperationData) ([]s
 		return nil, nil
 	}
 
-	if err := db.BatchUpsertWeather(ctx, w.db, weather); err != nil {
-		log.Errorf("Failed to batch upsert weather: %s", err)
+	err := retryOnDeadlock(ctx, 3, func() error {
+		return db.BatchUpsertWeather(ctx, w.db, weather)
+	})
+	if err != nil {
+		log.Errorf("Failed to batch upsert weather after retries: %s", err)
 		return nil, err
 	}
 
@@ -415,8 +465,11 @@ func (w *DBWriter) processStations(ctx context.Context, ops []OperationData) ([]
 		return nil, nil
 	}
 
-	if err := db.BatchUpsertStations(ctx, w.db, stations); err != nil {
-		log.Errorf("Failed to batch upsert stations: %s", err)
+	err := retryOnDeadlock(ctx, 3, func() error {
+		return db.BatchUpsertStations(ctx, w.db, stations)
+	})
+	if err != nil {
+		log.Errorf("Failed to batch upsert stations after retries: %s", err)
 		return nil, err
 	}
 
@@ -448,8 +501,11 @@ func (w *DBWriter) processRoutes(ctx context.Context, ops []OperationData) ([]st
 		return nil, nil
 	}
 
-	if err := db.BatchUpsertRoutes(ctx, w.db, routes); err != nil {
-		log.Errorf("Failed to batch upsert routes: %s", err)
+	err := retryOnDeadlock(ctx, 3, func() error {
+		return db.BatchUpsertRoutes(ctx, w.db, routes)
+	})
+	if err != nil {
+		log.Errorf("Failed to batch upsert routes after retries: %s", err)
 		return nil, err
 	}
 
@@ -481,8 +537,11 @@ func (w *DBWriter) processS2Cells(ctx context.Context, ops []OperationData) ([]s
 		return nil, nil
 	}
 
-	if err := db.BatchUpsertS2Cells(ctx, w.db, cells); err != nil {
-		log.Errorf("Failed to batch upsert s2cells: %s", err)
+	err := retryOnDeadlock(ctx, 3, func() error {
+		return db.BatchUpsertS2Cells(ctx, w.db, cells)
+	})
+	if err != nil {
+		log.Errorf("Failed to batch upsert s2cells after retries: %s", err)
 		return nil, err
 	}
 
@@ -514,8 +573,11 @@ func (w *DBWriter) processPlayers(ctx context.Context, ops []OperationData) ([]s
 		return nil, nil
 	}
 
-	if err := db.BatchUpsertPlayers(ctx, w.db, players); err != nil {
-		log.Errorf("Failed to batch upsert players: %s", err)
+	err := retryOnDeadlock(ctx, 3, func() error {
+		return db.BatchUpsertPlayers(ctx, w.db, players)
+	})
+	if err != nil {
+		log.Errorf("Failed to batch upsert players after retries: %s", err)
 		return nil, err
 	}
 
