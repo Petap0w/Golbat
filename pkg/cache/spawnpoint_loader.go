@@ -197,6 +197,26 @@ func LoadFortsToRedis(ctx context.Context, db *sqlx.DB, l2Cache *L2Cache) error 
 	log.Info("Loading pokestops and gyms into Redis...")
 	startTime := time.Now()
 
+	// Check if Redis already has data loaded (to avoid unnecessary reload)
+	// Sample a few keys from DB and check if they exist in Redis
+	var sampleIds []string
+	testQuery := "SELECT id FROM pokestop LIMIT 10"
+	if err := db.SelectContext(ctx, &sampleIds, testQuery); err == nil && len(sampleIds) > 0 {
+		existCount := 0
+		for _, id := range sampleIds {
+			key := fmt.Sprintf("pokestop:%s", id)
+			if l2Cache.Exists(ctx, key) {
+				existCount++
+			}
+		}
+
+		// If 80%+ of sample keys exist, assume Redis is already loaded
+		if existCount >= 8 {
+			log.Info("Redis already contains fort data, skipping reload (use 'load_hot_on_startup: false' to disable this check)")
+			return nil
+		}
+	}
+
 	// Load pokestops
 	pokestopQuery := "SELECT * FROM pokestop"
 	rows, err := db.QueryxContext(ctx, pokestopQuery)

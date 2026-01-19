@@ -241,3 +241,9 @@ func (c *L2Cache) GetAllKeys(ctx context.Context, pattern string) ([]string, err
 	return keys, nil
 }
 
+// Exists checks if a key exists in Redis
+func (c *L2Cache) Exists(ctx context.Context, key string) bool {
+	result, err := c.client.Exists(ctx, key).Result()
+	return err == nil && result > 0
+}
+

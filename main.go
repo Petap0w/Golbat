@@ -315,15 +315,11 @@ func main() {
 	}
 	decoder.InitFortTracker(staleThreshold)
 	
-	// Load forts into tracker - use Redis if available, otherwise DB
-	if cfg.Redis.Enabled && cfg.Redis.LoadHotOnStartup {
-		if err := decoder.LoadFortsFromRedis(ctx); err != nil {
-			log.Errorf("failed to load forts from Redis into tracker: %s", err)
-		}
-	} else {
-		if err := decoder.LoadFortsFromDB(ctx, dbDetails); err != nil {
-			log.Errorf("failed to load forts from DB into tracker: %s", err)
-		}
+	// Load forts into tracker
+	// Note: FortTracker only needs (id, cell_id, updated) - not full records
+	// Loading from DB with specific columns is faster than scanning 1.6M Redis keys
+	if err := decoder.LoadFortsFromDB(ctx, dbDetails); err != nil {
+		log.Errorf("failed to load forts from DB into tracker: %s", err)
 	}
 
 	if cfg.TestFortInMemory {

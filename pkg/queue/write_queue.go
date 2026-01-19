@@ -118,20 +118,35 @@ func (q *WriteQueue) GetQueueSizes(ctx context.Context) (map[string]int64, error
 }
 
 func (q *WriteQueue) Flush(ctx context.Context) error {
-	// Wait for queues to drain (with timeout)
-	timeout := time.After(30 * time.Second)
+	// Create a new context with timeout for flush operation
+	// Don't use the parent context which might already be canceled
+	flushCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-timeout:
-			log.Warn("Queue flush timeout, some writes may be pending")
-			return fmt.Errorf("flush timeout")
+		case <-flushCtx.Done():
+			// Check final state before giving up
+			sizes, _ := q.GetQueueSizes(context.Background())
+			total := int64(0)
+			for _, size := range sizes {
+				total += size
+			}
+			if total > 0 {
+				log.Warnf("Queue flush timeout, %d writes may be pending", total)
+				return fmt.Errorf("flush timeout: %d items remaining", total)
+			}
+			log.Info("All queues flushed successfully")
+			return nil
+			
 		case <-ticker.C:
-			sizes, err := q.GetQueueSizes(ctx)
+			sizes, err := q.GetQueueSizes(flushCtx)
 			if err != nil {
-				return err
+				log.Warnf("Failed to check queue sizes during flush: %s", err)
+				continue
 			}
 
 			total := int64(0)
@@ -144,7 +159,7 @@ func (q *WriteQueue) Flush(ctx context.Context) error {
 				return nil
 			}
 
-			log.Debugf("Waiting for queues to flush: %d items remaining", total)
+			log.Infof("Waiting for queues to flush: %d items remaining", total)
 		}
 	}
 }
