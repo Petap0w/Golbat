@@ -80,12 +80,11 @@ func (w *DBWriter) processStream(ctx context.Context, stream string) error {
 		Consumer: w.consumerName,
 		Streams:  []string{stream, ">"},
 		Count:    w.batchSize,
-		Block:    0, // Non-blocking to drain queue as fast as possible
+		Block:    time.Millisecond, // Block for 1ms - allows batch accumulation without blocking
 	}).Result()
 
 	if err == redis.Nil {
-		// No messages available, sleep briefly to prevent CPU spinning
-		time.Sleep(100 * time.Millisecond)
+		// No messages available
 		return nil
 	}
 	if err != nil {
@@ -93,8 +92,6 @@ func (w *DBWriter) processStream(ctx context.Context, stream string) error {
 	}
 
 	if len(streams) == 0 {
-		// No messages, sleep briefly
-		time.Sleep(100 * time.Millisecond)
 		return nil
 	}
 
