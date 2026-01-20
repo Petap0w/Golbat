@@ -177,9 +177,8 @@ func (station *Station) updateFromStationProto(stationProto *pogo.StationProto, 
 	// NOTE: Some names have more than 255 runes, which won't fit in our
 	// varchar(255).
 	if truncateStr, truncated := util.TruncateUTF8(stationProto.Name, 255); truncated {
-		log.Warnf("truncating name for station id '%s'. Orig name: %s",
+		log.Warnf("truncating name for station id '%s'",
 			stationProto.Id,
-			stationProto.Name,
 		)
 		station.Name = truncateStr
 	}

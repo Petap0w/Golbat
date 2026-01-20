@@ -2,9 +2,7 @@ package decoder
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,7 +12,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v4"
 
-	"golbat/config"
 	"golbat/db"
 	"golbat/pogo"
 	"golbat/tz"
@@ -109,61 +106,17 @@ type Pokestop struct {
 }
 
 func GetPokestopRecord(ctx context.Context, db db.DbDetails, fortId string) (*Pokestop, error) {
-	// L1 cache check
+	// L1 CACHE ONLY - no blocking I/O!
+	// Pokestops are NOT stored in Redis (only queued for DB writes)
+	// External services read from DB directly
 	stop := pokestopCache.Get(fortId)
 	if stop != nil {
 		pokestop := stop.Value()
 		return &pokestop, nil
 	}
 
-	// L2 cache check (Redis)
-	if redisEnabled {
-		var pokestop Pokestop
-		cacheKey := fmt.Sprintf("pokestop:%s", fortId)
-		err := getFromL2Cache(ctx, cacheKey, &pokestop)
-		if err == nil {
-			// Found in L2, populate L1
-			pokestopCache.Set(fortId, pokestop, ttlcache.DefaultTTL)
-			if config.Config.TestFortInMemory {
-				fortRtreeUpdatePokestopOnGet(&pokestop)
-			}
-			return &pokestop, nil
-		}
-	}
-
-	// DB fallback
-	pokestop := Pokestop{}
-	err := db.GeneralDb.GetContext(ctx, &pokestop,
-		`SELECT pokestop.id, lat, lon, name, url, enabled, lure_expire_timestamp, last_modified_timestamp,
-			pokestop.updated, quest_type, quest_timestamp, quest_target, quest_conditions,
-			quest_rewards, quest_template, quest_title,
-			alternative_quest_type, alternative_quest_timestamp, alternative_quest_target,
-			alternative_quest_conditions, alternative_quest_rewards,
-			alternative_quest_template, alternative_quest_title, cell_id, deleted, lure_id, sponsor_id, partner_id,
-			ar_scan_eligible, power_up_points, power_up_level, power_up_end_timestamp,
-			quest_expiry, alternative_quest_expiry, description, showcase_pokemon_id, showcase_pokemon_form_id,
-			showcase_pokemon_type_id, showcase_ranking_standard, showcase_expiry, showcase_rankings
-			FROM pokestop
-			WHERE pokestop.id = ? `, fortId)
-
-	statsCollector.IncDbQuery("select pokestop", err)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	// Populate caches
-	pokestopCache.Set(fortId, pokestop, ttlcache.DefaultTTL)
-	if redisEnabled {
-		cacheKey := fmt.Sprintf("pokestop:%s", fortId)
-		setToL2Cache(ctx, cacheKey, pokestop)
-	}
-	if config.Config.TestFortInMemory {
-		fortRtreeUpdatePokestopOnGet(&pokestop)
-	}
-	return &pokestop, nil
+	// Not in L1 cache = return nil (data will populate when scanned)
+	return nil, nil
 }
 
 // hasChangesPokestop compares two Pokestop structs
@@ -799,11 +752,8 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 	// Update L1 cache immediately for read consistency
 	pokestopCache.Set(pokestop.Id, *pokestop, ttlcache.DefaultTTL)
 
-	// Update L2 cache immediately
-	if redisEnabled {
-		cacheKey := fmt.Sprintf("pokestop:%s", pokestop.Id)
-		setToL2Cache(ctx, cacheKey, pokestop)
-	}
+	// NO L2 CACHE - pokestops only stored in L1 + queued for DB write
+	// External services read from DB directly
 
 	// Queue write to database
 	if redisEnabled {
