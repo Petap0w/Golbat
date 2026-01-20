@@ -159,6 +159,22 @@ func main() {
 		writeQueue = queue.NewWriteQueue(redisClient.GetClient(), cfg.Redis.MaxQueueSize)
 		log.Info("Write queue initialized")
 
+		// Pre-warm Redis connection pool to handle startup burst
+		log.Infof("Pre-warming Redis connection pool (%d connections)...", cfg.Redis.PoolSize)
+		preWarmStart := time.Now()
+		var wg sync.WaitGroup
+		for i := 0; i < cfg.Redis.PoolSize; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				redisClient.GetClient().Ping(ctx)
+			}()
+		}
+		wg.Wait()
+		log.Infof("Redis pool pre-warmed in %v", time.Since(preWarmStart))
+
 		// Initialize spawnpoint batch loader
 		spawnpointLoader := cache.NewSpawnpointLoader(l2Cache, db)
 
