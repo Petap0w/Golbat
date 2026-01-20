@@ -362,12 +362,11 @@ func BatchUpsertIncidents(ctx context.Context, db *sqlx.DB, incidents interface{
 // (Simplified for brevity - they all follow the transaction + PrepareNamed pattern)
 
 func BatchUpsertTappables(ctx context.Context, db *sqlx.DB, tappables interface{}) error {
-	// Same pattern as above
 	return executeBatch(ctx, db, tappables, `INSERT INTO tappable 
 		(id, lat, lon, fort_id, spawn_id, type, pokemon_id, item_id, count, 
 		 expire_timestamp, expire_timestamp_verified, updated)
 	VALUES 
-		(:id_str, :lat, :lon, :fort_id, :spawn_id, :type, :pokemon_id, :item_id, :count,
+		(:id, :lat, :lon, :fort_id, :spawn_id, :type, :pokemon_id, :item_id, :count,
 		 :expire_timestamp, :expire_timestamp_verified, :updated)
 	ON DUPLICATE KEY UPDATE
 		lat = VALUES(lat), lon = VALUES(lon), fort_id = VALUES(fort_id),
