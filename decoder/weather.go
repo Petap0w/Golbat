@@ -104,6 +104,7 @@ func (weather *Weather) updateWeatherFromClientWeatherProto(clientWeather *pogo.
 
 // hasChangesWeather compares two Weather structs
 // Float tolerance: Latitude, Longitude
+// Note: UpdatedMs is intentionally excluded - timestamp updates shouldn't trigger saves
 func hasChangesWeather(old *Weather, new *Weather) bool {
 	return old.Id != new.Id ||
 		old.Level != new.Level ||
@@ -117,7 +118,6 @@ func hasChangesWeather(old *Weather, new *Weather) bool {
 		old.SpecialEffectLevel != new.SpecialEffectLevel ||
 		old.Severity != new.Severity ||
 		old.WarnWeather != new.WarnWeather ||
-		old.UpdatedMs != new.UpdatedMs ||
 		!floatAlmostEqual(old.Latitude, new.Latitude, floatTolerance) ||
 		!floatAlmostEqual(old.Longitude, new.Longitude, floatTolerance)
 }
