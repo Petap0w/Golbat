@@ -2,9 +2,7 @@ package decoder
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"golbat/db"
 	"golbat/pogo"
@@ -50,27 +48,16 @@ type Station struct {
 }
 
 func getStationRecord(ctx context.Context, db db.DbDetails, stationId string) (*Station, error) {
+	// L1 CACHE ONLY - no blocking I/O!
+	// Stations are queued for DB writes, no need for blocking reads
 	inMemoryStation := stationCache.Get(stationId)
 	if inMemoryStation != nil {
 		station := inMemoryStation.Value()
 		return &station, nil
 	}
-	station := Station{}
-	err := db.GeneralDb.GetContext(ctx, &station,
-		`
-			SELECT id, lat, lon, name, cell_id, start_time, end_time, cooldown_complete, is_battle_available, is_inactive, updated, battle_level, battle_start, battle_end, battle_pokemon_id, battle_pokemon_form, battle_pokemon_costume, battle_pokemon_gender, battle_pokemon_alignment, battle_pokemon_bread_mode, battle_pokemon_move_1, battle_pokemon_move_2, battle_pokemon_stamina, battle_pokemon_cp_multiplier, total_stationed_pokemon, total_stationed_gmax, stationed_pokemon
-			FROM station WHERE id = ?
-		`, stationId)
-	statsCollector.IncDbQuery("select station", err)
 
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-
-	if err != nil {
-		return nil, err
-	}
-	return &station, nil
+	// Not in L1 cache = return nil (data will populate when scanned)
+	return nil, nil
 }
 
 func saveStationRecord(ctx context.Context, db db.DbDetails, station *Station) {

@@ -2,7 +2,6 @@ package decoder
 
 import (
 	"context"
-	"database/sql"
 	"golbat/db"
 	"golbat/pogo"
 	"golbat/webhooks"
@@ -53,27 +52,15 @@ type Weather struct {
 //)
 
 func getWeatherRecord(ctx context.Context, db db.DbDetails, weatherId int64) (*Weather, error) {
+	// L1 CACHE ONLY - no blocking I/O!
 	inMemoryWeather := weatherCache.Get(weatherId)
 	if inMemoryWeather != nil {
 		weather := inMemoryWeather.Value()
 		return &weather, nil
 	}
-	weather := Weather{}
 
-	err := db.GeneralDb.GetContext(ctx, &weather, "SELECT id, latitude, longitude, level, gameplay_condition, wind_direction, cloud_level, rain_level, wind_level, snow_level, fog_level, special_effect_level, severity, warn_weather, updated FROM weather WHERE id = ?", weatherId)
-
-	statsCollector.IncDbQuery("select weather", err)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	weather.UpdatedMs *= 1000
-	weatherCache.Set(weatherId, weather, ttlcache.DefaultTTL)
-	return &weather, nil
+	// Not in L1 cache = return nil
+	return nil, nil
 }
 
 func weatherCellIdFromLatLon(lat, lon float64) int64 {

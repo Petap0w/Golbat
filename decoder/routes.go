@@ -2,7 +2,6 @@ package decoder
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"golbat/db"
@@ -41,30 +40,15 @@ type Route struct {
 }
 
 func getRouteRecord(db db.DbDetails, id string) (*Route, error) {
+	// L1 CACHE ONLY - no blocking I/O!
 	inMemoryRoute := routeCache.Get(id)
 	if inMemoryRoute != nil {
 		route := inMemoryRoute.Value()
 		return &route, nil
 	}
 
-	route := Route{}
-	err := db.GeneralDb.Get(&route,
-		`
-		SELECT *
-		FROM route
-		WHERE route.id = ?
-		`,
-		id,
-	)
-	statsCollector.IncDbQuery("select route", err)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	} else if err != nil {
-		return nil, err
-	}
-
-	routeCache.Set(id, route, ttlcache.DefaultTTL)
-	return &route, nil
+	// Not in L1 cache = return nil
+	return nil, nil
 }
 
 // hasChangesRoute compares two Route structs

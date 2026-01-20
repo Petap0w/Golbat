@@ -192,6 +192,19 @@ var badgeTypeToPlayerKey = map[pogo.HoloBadgeType]string{
 }
 
 func getPlayerRecord(db db.DbDetails, name string, friendshipId string, friendCode string) (*Player, error) {
+	// L1 CACHE ONLY - no blocking I/O!
+	inMemoryPlayer := playerCache.Get(name)
+	if inMemoryPlayer != nil {
+		player := inMemoryPlayer.Value()
+		return &player, nil
+	}
+
+	// Not in L1 cache = return nil
+	return nil, nil
+}
+
+// Old function body removed - kept for reference if needed
+func getPlayerRecordOLD(db db.DbDetails, name string, friendshipId string, friendCode string) (*Player, error) {
 	inMemoryPlayer := playerCache.Get(name)
 	if inMemoryPlayer != nil {
 		player := inMemoryPlayer.Value()

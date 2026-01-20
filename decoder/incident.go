@@ -2,7 +2,6 @@ package decoder
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -50,28 +49,15 @@ type webhookLineup struct {
 //->   `updated` int unsigned NOT NULL,
 
 func getIncidentRecord(ctx context.Context, db db.DbDetails, incidentId string) (*Incident, error) {
+	// L1 CACHE ONLY - no blocking I/O!
 	inMemoryIncident := incidentCache.Get(incidentId)
 	if inMemoryIncident != nil {
 		incident := inMemoryIncident.Value()
 		return &incident, nil
 	}
 
-	incident := Incident{}
-	err := db.GeneralDb.GetContext(ctx, &incident,
-		"SELECT id, pokestop_id, start, expiration, display_type, style, `character`, updated, confirmed, slot_1_pokemon_id, slot_1_form, slot_2_pokemon_id, slot_2_form, slot_3_pokemon_id, slot_3_form "+
-			"FROM incident "+
-			"WHERE incident.id = ? ", incidentId)
-	statsCollector.IncDbQuery("select incident", err)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	incidentCache.Set(incidentId, incident, ttlcache.DefaultTTL)
-	return &incident, nil
+	// Not in L1 cache = return nil
+	return nil, nil
 }
 
 // hasChangesIncident compares two Incident structs
