@@ -441,12 +441,10 @@ func main() {
 	log.Info("http server is shutdown, waiting for other go routines to exit...")
 	wg.Wait()
 
-	// Flush Redis write queue before shutdown
+	// No need to flush Redis write queue - data is already persisted in Redis
+	// The writers will continue processing independently
 	if writeQueue != nil {
-		log.Info("Flushing Redis write queue...")
-		if err := writeQueue.Flush(ctx); err != nil {
-			log.Warnf("Failed to flush write queue: %s", err)
-		}
+		log.Info("All queued writes are in Redis, writers will handle them")
 	}
 
 	// Close Redis connection

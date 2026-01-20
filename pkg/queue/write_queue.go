@@ -106,12 +106,21 @@ func (q *WriteQueue) GetQueueSizes(ctx context.Context) (map[string]int64, error
 
 	streams := []string{StreamCritical, StreamHigh, StreamNormal}
 	for _, stream := range streams {
-		length, err := q.client.XLen(ctx, stream).Result()
+		// Get lag (unprocessed messages) instead of XLEN (total messages)
+		// XLEN includes processed messages, lag shows actual backlog
+		groups, err := q.client.XInfoGroups(ctx, stream).Result()
 		if err != nil {
-			log.Warnf("Failed to get length of %s: %s", stream, err)
+			log.Warnf("Failed to get group info for %s: %s", stream, err)
 			continue
 		}
-		sizes[stream] = length
+		
+		// Find golbat-writers group and get lag
+		for _, group := range groups {
+			if group.Name == "golbat-writers" {
+				sizes[stream] = group.Lag
+				break
+			}
+		}
 	}
 
 	return sizes, nil

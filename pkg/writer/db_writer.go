@@ -75,6 +75,30 @@ func (w *DBWriter) Run(ctx context.Context) error {
 }
 
 func (w *DBWriter) processStream(ctx context.Context, stream string) error {
+	// Auto-claim abandoned PENDING messages (from crashed workers)
+	// Reclaim messages PENDING for >10 seconds
+	claimedMsgs, _, err := w.redis.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+		Stream:   stream,
+		Group:    w.consumerGroup,
+		Consumer: w.consumerName,
+		MinIdle:  10 * time.Second,
+		Start:    "0-0",
+		Count:    100, // Claim up to 100 per iteration
+	}).Result()
+
+	if err != nil && err != redis.Nil {
+		log.Debugf("AutoClaim error on %s: %s", stream, err)
+	}
+
+	// Process reclaimed messages
+	if len(claimedMsgs) > 0 {
+		log.Infof("Reclaimed %d abandoned messages from %s", len(claimedMsgs), stream)
+		if err := w.processBatch(ctx, stream, claimedMsgs); err != nil {
+			log.Errorf("Failed to process reclaimed batch: %s", err)
+		}
+	}
+
+	// Read new messages
 	streams, err := w.redis.XReadGroup(ctx, &redis.XReadGroupArgs{
 		Group:    w.consumerGroup,
 		Consumer: w.consumerName,
