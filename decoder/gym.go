@@ -649,23 +649,25 @@ func createGymWebhooks(oldGym *Gym, gym *Gym, areas []geo.AreaName) {
 }
 
 func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
-	oldGym, _ := GetGymRecord(ctx, db, gym.Id)
-
+	// Only check L1 cache (no blocking I/O!)
+	// Cache miss = just save (accept duplicate writes, avoid blocking reads)
+	var oldGym *Gym
+	inMemoryGym := gymCache.Get(gym.Id)
 	now := time.Now().Unix()
-	if oldGym != nil && !hasChangesGym(oldGym, gym) {
-		if oldGym.Updated > now-900 {
-			// if a gym is unchanged, and we are within 15 minutes don't make any changes
-			// however, gym battle toggle a chance to trigger a web hook and make sure we
-			// save defender changes to internal cache
 
-			if hasInternalChangesGym(oldGym, gym) {
-				areas := MatchStatsGeofence(gym.Lat, gym.Lon)
-				createGymWebhooks(oldGym, gym, areas)
-
-				gymCache.Set(gym.Id, *gym, ttlcache.DefaultTTL)
+	if inMemoryGym != nil {
+		val := inMemoryGym.Value()
+		oldGym = &val
+		if !hasChangesGym(oldGym, gym) {
+			if oldGym.Updated > now-900 {
+				// Unchanged and recently updated
+				if hasInternalChangesGym(oldGym, gym) {
+					areas := MatchStatsGeofence(gym.Lat, gym.Lon)
+					createGymWebhooks(oldGym, gym, areas)
+					gymCache.Set(gym.Id, *gym, ttlcache.DefaultTTL)
+				}
+				return
 			}
-
-			return
 		}
 	}
 

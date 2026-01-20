@@ -777,14 +777,23 @@ func createPokestopWebhooks(oldStop *Pokestop, stop *Pokestop) {
 }
 
 func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop) {
-	oldPokestop, _ := GetPokestopRecord(ctx, db, pokestop.Id)
+	// Only check L1 cache (no blocking I/O!)
+	// Cache miss = just save (accept duplicate writes, avoid blocking reads)
+	var oldPokestop *Pokestop
+	inMemoryPokestop := pokestopCache.Get(pokestop.Id)
 	now := time.Now().Unix()
-	if oldPokestop != nil && !hasChangesPokestop(oldPokestop, pokestop) {
-		if oldPokestop.Updated > now-900 {
-			// if a pokestop is unchanged, but we did see it again after 15 minutes, then save again
-			return
+
+	if inMemoryPokestop != nil {
+		val := inMemoryPokestop.Value()
+		oldPokestop = &val
+		if !hasChangesPokestop(oldPokestop, pokestop) {
+			if oldPokestop.Updated > now-900 {
+				// Unchanged and recently updated, skip save
+				return
+			}
 		}
 	}
+
 	pokestop.Updated = now
 
 	// Update L1 cache immediately for read consistency
