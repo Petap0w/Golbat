@@ -426,22 +426,21 @@ func BatchUpsertStations(ctx context.Context, db *sqlx.DB, stations interface{})
 
 func BatchUpsertRoutes(ctx context.Context, db *sqlx.DB, routes interface{}) error {
 	return executeBatch(ctx, db, routes, `INSERT INTO route 
-		(id, name, description, distance_meters, duration_seconds, start_lat, start_lon, 
-		 start_image, end_lat, end_lon, end_image, updated, reversible, tags, route_submission_start_timestamp_ms,
-		 route_submission_end_timestamp_ms, type, version, path, waypoints, image, image_border_color_hex)
+		(id, name, shortcode, description, distance_meters, duration_seconds, start_fort_id, start_lat, start_lon, 
+		 start_image, end_fort_id, end_lat, end_lon, end_image, updated, reversible, tags,
+		 type, version, waypoints, image, image_border_color)
 	VALUES
-		(:id, :name, :description, :distance_meters, :duration_seconds, :start_lat, :start_lon,
-		 :start_image, :end_lat, :end_lon, :end_image, :updated, :reversible, :tags, :route_submission_start_timestamp_ms,
-		 :route_submission_end_timestamp_ms, :type, :version, :path, :waypoints, :image, :image_border_color_hex)
+		(:id, :name, :shortcode, :description, :distance_meters, :duration_seconds, :start_fort_id, :start_lat, :start_lon,
+		 :start_image, :end_fort_id, :end_lat, :end_lon, :end_image, :updated, :reversible, :tags,
+		 :type, :version, :waypoints, :image, :image_border_color)
 	ON DUPLICATE KEY UPDATE
-		name = VALUES(name), description = VALUES(description), distance_meters = VALUES(distance_meters),
-		duration_seconds = VALUES(duration_seconds), start_lat = VALUES(start_lat), start_lon = VALUES(start_lon),
-		start_image = VALUES(start_image), end_lat = VALUES(end_lat), end_lon = VALUES(end_lon),
-		end_image = VALUES(end_image), updated = VALUES(updated), reversible = VALUES(reversible),
-		tags = VALUES(tags), route_submission_start_timestamp_ms = VALUES(route_submission_start_timestamp_ms),
-		route_submission_end_timestamp_ms = VALUES(route_submission_end_timestamp_ms),
-		type = VALUES(type), version = VALUES(version), path = VALUES(path),
-		waypoints = VALUES(waypoints), image = VALUES(image), image_border_color_hex = VALUES(image_border_color_hex)`, "batch_upsert_routes")
+		name = VALUES(name), shortcode = VALUES(shortcode), description = VALUES(description),
+		distance_meters = VALUES(distance_meters), duration_seconds = VALUES(duration_seconds),
+		start_fort_id = VALUES(start_fort_id), start_lat = VALUES(start_lat), start_lon = VALUES(start_lon),
+		start_image = VALUES(start_image), end_fort_id = VALUES(end_fort_id), end_lat = VALUES(end_lat),
+		end_lon = VALUES(end_lon), end_image = VALUES(end_image), updated = VALUES(updated),
+		reversible = VALUES(reversible), tags = VALUES(tags), type = VALUES(type), version = VALUES(version),
+		waypoints = VALUES(waypoints), image = VALUES(image), image_border_color = VALUES(image_border_color)`, "batch_upsert_routes")
 }
 
 func BatchUpsertS2Cells(ctx context.Context, db *sqlx.DB, cells interface{}) error {
