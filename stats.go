@@ -5,20 +5,29 @@ import (
 	"fmt"
 	"golbat/config"
 	"golbat/decoder"
+	"golbat/pkg/redis"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 	log "github.com/sirupsen/logrus"
 )
 
-func StartDbUsageStatsLogger(db *sqlx.DB) {
+func StartDbUsageStatsLogger(db *sqlx.DB, redisClient *redis.Client) {
 	ticker := time.NewTicker(30 * time.Second)
 	go func() {
 		for {
 			<-ticker.C
 
-			stats := db.Stats()
-			log.Infof("DB - InUse: %d Idle %d WaitDuration %s", stats.InUse, stats.Idle, stats.WaitDuration)
+			dbStats := db.Stats()
+			log.Infof("DB - InUse: %d Idle: %d WaitDuration: %s", dbStats.InUse, dbStats.Idle, dbStats.WaitDuration)
+
+			// Log Redis pool stats if Redis is enabled
+			if redisClient != nil {
+				poolStats := redisClient.PoolStats()
+				log.Infof("Redis - Hits: %d Misses: %d Timeouts: %d TotalConns: %d IdleConns: %d StaleConns: %d", 
+					poolStats.Hits, poolStats.Misses, poolStats.Timeouts, 
+					poolStats.TotalConns, poolStats.IdleConns, poolStats.StaleConns)
+			}
 		}
 	}()
 }

@@ -85,3 +85,11 @@ func (c *Client) Ping(ctx context.Context) error {
 func (c *Client) IsEnabled() bool {
 	return c.config.Enabled && c.client != nil
 }
+
+// PoolStats returns connection pool statistics
+func (c *Client) PoolStats() *redis.PoolStats {
+	if c.client == nil {
+		return nil
+	}
+	return c.client.PoolStats()
+}

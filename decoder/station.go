@@ -264,7 +264,7 @@ func ResetStationedPokemonWithStationDetailsNotFound(ctx context.Context, db db.
 	}
 
 	if station == nil {
-		log.Infof("Stationed pokemon details for station %s not found", stationId)
+		log.Debugf("Stationed pokemon details for station %s not found", stationId)
 		return fmt.Sprintf("Stationed pokemon details for station %s not found", stationId)
 	}
 
@@ -286,7 +286,7 @@ func UpdateStationWithStationDetails(ctx context.Context, db db.DbDetails, reque
 	}
 
 	if station == nil {
-		log.Infof("Stationed pokemon details for station %s not found", stationId)
+		log.Debugf("Stationed pokemon details for station %s not found", stationId)
 		return fmt.Sprintf("Stationed pokemon details for station %s not found", stationId)
 	}
 

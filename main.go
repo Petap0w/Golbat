@@ -277,7 +277,7 @@ func main() {
 
 	log.Infoln("Golbat started")
 
-	StartDbUsageStatsLogger(db)
+	StartDbUsageStatsLogger(db, redisClient)
 	decoder.StartStatsWriter(db)
 
 	if cfg.Tuning.ExtendedTimeout {

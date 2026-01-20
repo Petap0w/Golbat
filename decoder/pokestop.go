@@ -1003,7 +1003,7 @@ func UpdatePokestopWithContestData(ctx context.Context, db db.DbDetails, request
 	}
 
 	if pokestop == nil {
-		log.Infof("Contest data for pokestop %s not found", fortId)
+		log.Debugf("Contest data for pokestop %s not found", fortId)
 		return fmt.Sprintf("Contest data for pokestop %s not found", fortId)
 	}
 
@@ -1031,7 +1031,7 @@ func UpdatePokestopWithPokemonSizeContestEntry(ctx context.Context, db db.DbDeta
 	}
 
 	if pokestop == nil {
-		log.Infof("Contest data for pokestop %s not found", fortId)
+		log.Debugf("Contest data for pokestop %s not found", fortId)
 		return fmt.Sprintf("Contest data for pokestop %s not found", fortId)
 	}
 

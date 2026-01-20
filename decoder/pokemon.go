@@ -1127,7 +1127,7 @@ func (pokemon *Pokemon) addEncounterPokemon(ctx context.Context, db db.DbDetails
 	if scan.CellWeather == int32(pogo.GameplayWeatherProto_NONE) {
 		weather, err := getWeatherRecord(ctx, db, weatherCellIdFromLatLon(pokemon.Lat, pokemon.Lon))
 		if err != nil || weather == nil || !weather.GameplayCondition.Valid {
-			log.Warnf("Failed to obtain weather for Pokemon %d: %s", pokemon.Id, err)
+			log.Debugf("Failed to obtain weather for Pokemon %d: %s", pokemon.Id, err) // Debug level - normal on startup
 		} else {
 			scan.CellWeather = int32(weather.GameplayCondition.Int64)
 		}
@@ -1351,7 +1351,7 @@ func (pokemon *Pokemon) recomputeCpIfNeeded(ctx context.Context, db db.DbDetails
 			if !found {
 				record, err := getWeatherRecord(ctx, db, cellId)
 				if err != nil || record == nil || !record.GameplayCondition.Valid {
-					log.Warnf("[POKEMON] Failed to obtain weather for Pokemon %d: %s", pokemon.Id, err)
+					log.Debugf("[POKEMON] Failed to obtain weather for Pokemon %d: %s", pokemon.Id, err) // Debug level - normal on startup
 				} else {
 					log.Warnf("[POKEMON] Weather not found locally for %d at %d", pokemon.Id, cellId)
 					cellWeather = pogo.GameplayWeatherProto_WeatherCondition(record.GameplayCondition.Int64)
