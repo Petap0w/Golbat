@@ -83,7 +83,7 @@ func (w *DBWriter) processStream(ctx context.Context, stream string) error {
 		Consumer: w.consumerName,
 		MinIdle:  10 * time.Second,
 		Start:    "0-0",
-		Count:    100, // Claim up to 100 per iteration
+		Count:    int64(w.batchSize), // Use configured batch size
 	}).Result()
 
 	if err != nil && err != redis.Nil {
