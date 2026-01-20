@@ -45,8 +45,8 @@ func NewClient(cfg *Config) (*Client, error) {
 		MaxRetries:   3,
 		DialTimeout:  5 * time.Second,
 		ReadTimeout:  500 * time.Millisecond, // Fast cache reads (1-5ms normal, <50ms during BGSAVE)
-		WriteTimeout: 1 * time.Second,        // Queue writes slightly longer
-		PoolTimeout:  2 * time.Second,        // Connection acquisition timeout
+		WriteTimeout: 3 * time.Second,        // Handles startup burst (normally <100ms, burst can spike)
+		PoolTimeout:  3 * time.Second,        // Connection acquisition timeout
 	}
 
 	client := redis.NewClient(opts)
