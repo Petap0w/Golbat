@@ -279,7 +279,7 @@ func (w *DBWriter) processPokestops(ctx context.Context, ops []OperationData) ([
 			successCount++
 		} else {
 			// Failed - don't ACK, will be retried
-			log.Debugf("Failed to upsert pokestop %s: %s", pokestop.Id, err)
+			log.Errorf("Failed to upsert pokestop %s: %s", pokestop.Id, err)
 		}
 	}
 
@@ -322,7 +322,7 @@ func (w *DBWriter) processGyms(ctx context.Context, ops []OperationData) ([]stri
 			successfulIds = append(successfulIds, ops[i].MessageID)
 			successCount++
 		} else {
-			log.Debugf("Failed to upsert gym %s: %s", gym.Id, err)
+			log.Errorf("Failed to upsert gym %s: %s", gym.Id, err)
 		}
 	}
 
@@ -356,7 +356,7 @@ func (w *DBWriter) processSpawnpoints(ctx context.Context, ops []OperationData) 
 			successfulIds = append(successfulIds, opData.MessageID)
 			successCount++
 		} else {
-			log.Debugf("Failed to upsert spawnpoint %d: %s", spawnpoint.Id, err)
+			log.Errorf("Failed to upsert spawnpoint %d: %s", spawnpoint.Id, err)
 		}
 	}
 
@@ -390,7 +390,7 @@ func (w *DBWriter) processIncidents(ctx context.Context, ops []OperationData) ([
 			successfulIds = append(successfulIds, opData.MessageID)
 			successCount++
 		} else {
-			log.Debugf("Failed to upsert incident %s: %s", incident.Id, err)
+			log.Errorf("Failed to upsert incident %s: %s", incident.Id, err)
 		}
 	}
 
@@ -424,7 +424,7 @@ func (w *DBWriter) processTappables(ctx context.Context, ops []OperationData) ([
 			successfulIds = append(successfulIds, opData.MessageID)
 			successCount++
 		} else {
-			log.Debugf("Failed to upsert tappable %d: %s", tappable.Id, err)
+			log.Errorf("Failed to upsert tappable %d: %s", tappable.Id, err)
 		}
 	}
 
@@ -458,7 +458,7 @@ func (w *DBWriter) processWeather(ctx context.Context, ops []OperationData) ([]s
 			successfulIds = append(successfulIds, opData.MessageID)
 			successCount++
 		} else {
-			log.Debugf("Failed to upsert weather %d: %s", weather.Id, err)
+			log.Errorf("Failed to upsert weather %d: %s", weather.Id, err)
 		}
 	}
 
@@ -492,7 +492,7 @@ func (w *DBWriter) processStations(ctx context.Context, ops []OperationData) ([]
 			successfulIds = append(successfulIds, opData.MessageID)
 			successCount++
 		} else {
-			log.Debugf("Failed to upsert station %s: %s", station.Id, err)
+			log.Errorf("Failed to upsert station %s: %s", station.Id, err)
 		}
 	}
 
@@ -526,7 +526,7 @@ func (w *DBWriter) processRoutes(ctx context.Context, ops []OperationData) ([]st
 			successfulIds = append(successfulIds, opData.MessageID)
 			successCount++
 		} else {
-			log.Debugf("Failed to upsert route %s: %s", route.Id, err)
+			log.Errorf("Failed to upsert route %s: %s", route.Id, err)
 		}
 	}
 
@@ -560,7 +560,7 @@ func (w *DBWriter) processS2Cells(ctx context.Context, ops []OperationData) ([]s
 			successfulIds = append(successfulIds, opData.MessageID)
 			successCount++
 		} else {
-			log.Debugf("Failed to upsert s2cell %d: %s", cell.Id, err)
+			log.Errorf("Failed to upsert s2cell %d: %s", cell.Id, err)
 		}
 	}
 
@@ -594,7 +594,7 @@ func (w *DBWriter) processPlayers(ctx context.Context, ops []OperationData) ([]s
 			successfulIds = append(successfulIds, opData.MessageID)
 			successCount++
 		} else {
-			log.Debugf("Failed to upsert player %s: %s", player.Name, err)
+			log.Errorf("Failed to upsert player %s: %s", player.Name, err)
 		}
 	}
 
