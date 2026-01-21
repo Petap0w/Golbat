@@ -2,11 +2,13 @@ package db
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"reflect"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
+	log "github.com/sirupsen/logrus"
 )
 
 // buildBatchQuery builds a batch INSERT query with multiple VALUE clauses
@@ -394,7 +396,57 @@ func BatchUpsertWeather(ctx context.Context, db *sqlx.DB, weather interface{}) e
 		updated = VALUES(updated)`, "batch_upsert_weather")
 }
 
+// sanitizeStationIDs decodes base64-encoded station IDs and truncates if needed
+// Safety net for old data in Redis streams from before base64 decoding was added
+func sanitizeStationIDs(stations interface{}) {
+	v := reflect.ValueOf(stations)
+	if v.Kind() != reflect.Slice {
+		return
+	}
+
+	for i := 0; i < v.Len(); i++ {
+		station := v.Index(i)
+		if station.Kind() == reflect.Ptr {
+			station = station.Elem()
+		}
+		if station.Kind() != reflect.Struct {
+			continue
+		}
+
+		// Get ID field
+		idField := station.FieldByName("Id")
+		if !idField.IsValid() || !idField.CanSet() || idField.Kind() != reflect.String {
+			continue
+		}
+
+		id := idField.String()
+		if len(id) <= 35 {
+			continue // Already valid
+		}
+
+		// Try base64 decode
+		if decoded, err := base64.StdEncoding.DecodeString(id); err == nil {
+			decodedID := string(decoded)
+			if len(decodedID) <= 35 {
+				idField.SetString(decodedID)
+				log.Debugf("Decoded base64 station ID: %s → %s", id[:20]+"...", decodedID)
+			} else {
+				// Even decoded is too long, truncate
+				idField.SetString(decodedID[:35])
+				log.Warnf("Truncated oversized station ID: %s", decodedID[:35])
+			}
+		} else {
+			// Not base64, just truncate
+			idField.SetString(id[:35])
+			log.Warnf("Truncated non-base64 station ID: %s", id[:35])
+		}
+	}
+}
+
 func BatchUpsertStations(ctx context.Context, db *sqlx.DB, stations interface{}) error {
+	// Safety net: decode base64 station IDs from old data in Redis streams
+	sanitizeStationIDs(stations)
+
 	return executeBatch(ctx, db, stations, `INSERT INTO station 
 		(id, lat, lon, name, cell_id, start_time, end_time, cooldown_complete, is_battle_available, 
 		 is_inactive, updated, battle_level, battle_start, battle_end, battle_pokemon_id, 

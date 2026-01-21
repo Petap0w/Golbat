@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/guregu/null.v4"
 
 	"golbat/config"
 )
@@ -237,112 +238,216 @@ func streamTableToCacheDirect(
 
 // loadPokestopsFromDB streams pokestops from DB into L1 cache
 func loadPokestopsFromDB(ctx context.Context, dbConn *sqlx.DB, setter FortSetter) int64 {
+	// Import decoder locally to avoid import cycle
+	type Pokestop struct {
+		Id                         string      `db:"id"`
+		Lat                        float64     `db:"lat"`
+		Lon                        float64     `db:"lon"`
+		Name                       null.String `db:"name"`
+		Url                        null.String `db:"url"`
+		Enabled                    null.Bool   `db:"enabled"`
+		LureExpireTimestamp        null.Int    `db:"lure_expire_timestamp"`
+		LastModifiedTimestamp      null.Int    `db:"last_modified_timestamp"`
+		Updated                    int64       `db:"updated"`
+		QuestType                  null.Int    `db:"quest_type"`
+		QuestTimestamp             null.Int    `db:"quest_timestamp"`
+		QuestTarget                null.Int    `db:"quest_target"`
+		QuestConditions            null.String `db:"quest_conditions"`
+		QuestRewards               null.String `db:"quest_rewards"`
+		QuestTemplate              null.String `db:"quest_template"`
+		QuestTitle                 null.String `db:"quest_title"`
+		QuestExpiry                null.Int    `db:"quest_expiry"`
+		AlternativeQuestType       null.Int    `db:"alternative_quest_type"`
+		AlternativeQuestTimestamp  null.Int    `db:"alternative_quest_timestamp"`
+		AlternativeQuestTarget     null.Int    `db:"alternative_quest_target"`
+		AlternativeQuestConditions null.String `db:"alternative_quest_conditions"`
+		AlternativeQuestRewards    null.String `db:"alternative_quest_rewards"`
+		AlternativeQuestTemplate   null.String `db:"alternative_quest_template"`
+		AlternativeQuestTitle      null.String `db:"alternative_quest_title"`
+		AlternativeQuestExpiry     null.Int    `db:"alternative_quest_expiry"`
+		CellId                     null.Int    `db:"cell_id"`
+		Deleted                    bool        `db:"deleted"`
+		LureId                     null.Int    `db:"lure_id"`
+		FirstSeenTimestamp         int64       `db:"first_seen_timestamp"`
+		SponsorId                  null.Int    `db:"sponsor_id"`
+		PartnerId                  null.String `db:"partner_id"`
+		ArScanEligible             null.Int    `db:"ar_scan_eligible"`
+		PowerUpLevel               null.Int    `db:"power_up_level"`
+		PowerUpPoints              null.Int    `db:"power_up_points"`
+		PowerUpEndTimestamp        null.Int    `db:"power_up_end_timestamp"`
+		Description                null.String `db:"description"`
+		ShowcasePokemonId          null.Int    `db:"showcase_pokemon_id"`
+		ShowcasePokemonFormId      null.Int    `db:"showcase_pokemon_form_id"`
+		ShowcasePokemonTypeId      null.Int    `db:"showcase_pokemon_type_id"`
+		ShowcaseRankingStandard    null.Int    `db:"showcase_ranking_standard"`
+		ShowcaseFocus              null.Int    `db:"showcase_focus"`
+		ShowcaseExpiry             null.Int    `db:"showcase_expiry"`
+		ShowcaseRankings           null.String `db:"showcase_rankings"`
+	}
+
 	return streamTableToCacheDirect(ctx, dbConn, "pokestop",
 		func(rows *sqlx.Rows) error {
-			// Scan directly into map
-			result := make(map[string]interface{})
-			if err := rows.MapScan(result); err != nil {
+			var stop Pokestop
+			if err := rows.StructScan(&stop); err != nil {
 				return err
 			}
 
-			// Extract ID
-			id, ok := result["id"].([]byte)
-			if !ok {
-				if idStr, ok := result["id"].(string); ok {
-					id = []byte(idStr)
-				} else {
-					return nil // Skip if no ID
-				}
-			}
-
 			// Marshal to JSON for setter
-			jsonData, err := json.Marshal(result)
+			jsonData, err := json.Marshal(stop)
 			if err != nil {
 				return err
 			}
 
-			return setter.SetPokestop(string(id), jsonData)
+			return setter.SetPokestop(stop.Id, jsonData)
 		})
 }
 
 // loadGymsFromDB streams gyms from DB into L1 cache
 func loadGymsFromDB(ctx context.Context, dbConn *sqlx.DB, setter FortSetter) int64 {
+	// Lightweight struct matching DB schema (avoids import cycle with decoder)
+	type Gym struct {
+		Id                    string      `db:"id"`
+		Lat                   float64     `db:"lat"`
+		Lon                   float64     `db:"lon"`
+		Name                  null.String `db:"name"`
+		Url                   null.String `db:"url"`
+		LastModifiedTimestamp null.Int    `db:"last_modified_timestamp"`
+		RaidEndTimestamp      null.Int    `db:"raid_end_timestamp"`
+		RaidSpawnTimestamp    null.Int    `db:"raid_spawn_timestamp"`
+		RaidBattleTimestamp   null.Int    `db:"raid_battle_timestamp"`
+		Updated               int64       `db:"updated"`
+		RaidPokemonId         null.Int    `db:"raid_pokemon_id"`
+		GuardingPokemonId     null.Int    `db:"guarding_pokemon_id"`
+		AvailableSlots        null.Int    `db:"available_slots"`
+		TeamId                null.Int    `db:"team_id"`
+		RaidLevel             null.Int    `db:"raid_level"`
+		Enabled               null.Bool   `db:"enabled"`
+		ExRaidEligible        null.Bool   `db:"ex_raid_eligible"`
+		InBattle              null.Bool   `db:"in_battle"`
+		RaidPokemonMove1      null.Int    `db:"raid_pokemon_move_1"`
+		RaidPokemonMove2      null.Int    `db:"raid_pokemon_move_2"`
+		RaidPokemonForm       null.Int    `db:"raid_pokemon_form"`
+		RaidPokemonCp         null.Int    `db:"raid_pokemon_cp"`
+		RaidIsExclusive       null.Bool   `db:"raid_is_exclusive"`
+		CellId                null.Int    `db:"cell_id"`
+		Deleted               bool        `db:"deleted"`
+		TotalCp               null.Int    `db:"total_cp"`
+		FirstSeenTimestamp    int64       `db:"first_seen_timestamp"`
+		RaidPokemonGender     null.Int    `db:"raid_pokemon_gender"`
+		SponsorId             null.Int    `db:"sponsor_id"`
+		PartnerId             null.String `db:"partner_id"`
+		RaidPokemonCostume    null.Int    `db:"raid_pokemon_costume"`
+		RaidPokemonEvolution  null.Int    `db:"raid_pokemon_evolution"`
+		ArScanEligible        null.Int    `db:"ar_scan_eligible"`
+		PowerUpLevel          null.Int    `db:"power_up_level"`
+		PowerUpPoints         null.Int    `db:"power_up_points"`
+		PowerUpEndTimestamp   null.Int    `db:"power_up_end_timestamp"`
+	}
+
 	return streamTableToCacheDirect(ctx, dbConn, "gym",
 		func(rows *sqlx.Rows) error {
-			result := make(map[string]interface{})
-			if err := rows.MapScan(result); err != nil {
+			var gym Gym
+			if err := rows.StructScan(&gym); err != nil {
 				return err
 			}
 
-			id, ok := result["id"].([]byte)
-			if !ok {
-				if idStr, ok := result["id"].(string); ok {
-					id = []byte(idStr)
-				} else {
-					return nil
-				}
-			}
-
-			jsonData, err := json.Marshal(result)
+			jsonData, err := json.Marshal(gym)
 			if err != nil {
 				return err
 			}
 
-			return setter.SetGym(string(id), jsonData)
+			return setter.SetGym(gym.Id, jsonData)
 		})
 }
 
 // loadStationsFromDB streams stations from DB into L1 cache
 func loadStationsFromDB(ctx context.Context, dbConn *sqlx.DB, setter FortSetter) int64 {
+	type Station struct {
+		Id                        string      `db:"id"`
+		Lat                       float64     `db:"lat"`
+		Lon                       float64     `db:"lon"`
+		Name                      string      `db:"name"`
+		CellId                    int64       `db:"cell_id"`
+		StartTime                 int64       `db:"start_time"`
+		EndTime                   int64       `db:"end_time"`
+		CooldownComplete          int64       `db:"cooldown_complete"`
+		IsBattleAvailable         bool        `db:"is_battle_available"`
+		IsInactive                bool        `db:"is_inactive"`
+		Updated                   int64       `db:"updated"`
+		BattleLevel               null.Int    `db:"battle_level"`
+		BattleStart               null.Int    `db:"battle_start"`
+		BattleEnd                 null.Int    `db:"battle_end"`
+		BattlePokemonId           null.Int    `db:"battle_pokemon_id"`
+		BattlePokemonForm         null.Int    `db:"battle_pokemon_form"`
+		BattlePokemonCostume      null.Int    `db:"battle_pokemon_costume"`
+		BattlePokemonGender       null.Int    `db:"battle_pokemon_gender"`
+		BattlePokemonAlignment    null.Int    `db:"battle_pokemon_alignment"`
+		BattlePokemonBreadMode    null.Int    `db:"battle_pokemon_bread_mode"`
+		BattlePokemonMove1        null.Int    `db:"battle_pokemon_move_1"`
+		BattlePokemonMove2        null.Int    `db:"battle_pokemon_move_2"`
+		BattlePokemonStamina      null.Int    `db:"battle_pokemon_stamina"`
+		BattlePokemonCpMultiplier null.Float  `db:"battle_pokemon_cp_multiplier"`
+		TotalStationedPokemon     null.Int    `db:"total_stationed_pokemon"`
+		TotalStationedGmax        null.Int    `db:"total_stationed_gmax"`
+		StationedPokemon          null.String `db:"stationed_pokemon"`
+	}
+
 	return streamTableToCacheDirect(ctx, dbConn, "station",
 		func(rows *sqlx.Rows) error {
-			result := make(map[string]interface{})
-			if err := rows.MapScan(result); err != nil {
+			var station Station
+			if err := rows.StructScan(&station); err != nil {
 				return err
 			}
 
-			id, ok := result["id"].([]byte)
-			if !ok {
-				if idStr, ok := result["id"].(string); ok {
-					id = []byte(idStr)
-				} else {
-					return nil
-				}
-			}
-
-			jsonData, err := json.Marshal(result)
+			jsonData, err := json.Marshal(station)
 			if err != nil {
 				return err
 			}
 
-			return setter.SetStation(string(id), jsonData)
+			return setter.SetStation(station.Id, jsonData)
 		})
 }
 
 // loadRoutesFromDB streams routes from DB into L1 cache
 func loadRoutesFromDB(ctx context.Context, dbConn *sqlx.DB, setter FortSetter) int64 {
+	type Route struct {
+		Id               string      `db:"id"`
+		Name             string      `db:"name"`
+		Shortcode        null.String `db:"shortcode"`
+		Description      null.String `db:"description"`
+		DistanceMeters   null.Int    `db:"distance_meters"`
+		DurationSeconds  null.Int    `db:"duration_seconds"`
+		StartFortId      null.String `db:"start_fort_id"`
+		StartLat         null.Float  `db:"start_lat"`
+		StartLon         null.Float  `db:"start_lon"`
+		StartImage       null.String `db:"start_image"`
+		EndFortId        null.String `db:"end_fort_id"`
+		EndLat           null.Float  `db:"end_lat"`
+		EndLon           null.Float  `db:"end_lon"`
+		EndImage         null.String `db:"end_image"`
+		Updated          int64       `db:"updated"`
+		Reversible       null.Bool   `db:"reversible"`
+		Tags             null.String `db:"tags"`
+		Type             null.Int    `db:"type"`
+		Version          null.Int    `db:"version"`
+		Waypoints        null.String `db:"waypoints"`
+		Image            null.String `db:"image"`
+		ImageBorderColor null.String `db:"image_border_color"`
+	}
+
 	return streamTableToCacheDirect(ctx, dbConn, "route",
 		func(rows *sqlx.Rows) error {
-			result := make(map[string]interface{})
-			if err := rows.MapScan(result); err != nil {
+			var route Route
+			if err := rows.StructScan(&route); err != nil {
 				return err
 			}
 
-			id, ok := result["id"].([]byte)
-			if !ok {
-				if idStr, ok := result["id"].(string); ok {
-					id = []byte(idStr)
-				} else {
-					return nil
-				}
-			}
-
-			jsonData, err := json.Marshal(result)
+			jsonData, err := json.Marshal(route)
 			if err != nil {
 				return err
 			}
 
-			return setter.SetRoute(string(id), jsonData)
+			return setter.SetRoute(route.Id, jsonData)
 		})
 }
 
