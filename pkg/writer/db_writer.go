@@ -16,17 +16,22 @@ import (
 )
 
 type DBWriter struct {
-	redis         *redis.Client
-	db            *sqlx.DB
-	consumerGroup string
-	consumerName  string
-	batchSize     int64
-	streams       []string
+	redis            *redis.Client
+	db               *sqlx.DB
+	consumerGroup    string
+	consumerName     string
+	batchSize        int64
+	streams          []string
+	trimTarget       int64 // Target size to trim streams to
+	batchesProcessed int   // Counter for periodic trimming
 }
 
-func NewDBWriter(redis *redis.Client, db *sqlx.DB, consumerName string, batchSize int) *DBWriter {
+func NewDBWriter(redis *redis.Client, db *sqlx.DB, consumerName string, batchSize int, trimTarget int64) *DBWriter {
 	if batchSize == 0 {
 		batchSize = 500
+	}
+	if trimTarget == 0 {
+		trimTarget = 100000 // Default: keep 100k messages
 	}
 
 	return &DBWriter{
@@ -35,6 +40,7 @@ func NewDBWriter(redis *redis.Client, db *sqlx.DB, consumerName string, batchSiz
 		consumerGroup: "golbat-writers",
 		consumerName:  consumerName,
 		batchSize:     int64(batchSize),
+		trimTarget:    trimTarget,
 		streams: []string{
 			queue.StreamCritical,
 			queue.StreamHigh,
@@ -176,9 +182,35 @@ func (w *DBWriter) processBatch(ctx context.Context, stream string, messages []r
 		}
 
 		log.Debugf("Processed %d operations from %s", len(processedIDs), stream)
+
+		// Periodically trim stream (every 10 batches to reduce overhead)
+		w.batchesProcessed++
+		if w.batchesProcessed >= 10 {
+			w.batchesProcessed = 0
+			w.trimStream(ctx, stream)
+		}
 	}
 
 	return nil
+}
+
+// trimStream keeps the stream at a manageable size by trimming old messages
+// This is done in the background by workers, not during XADD
+func (w *DBWriter) trimStream(ctx context.Context, stream string) {
+	// Use XTRIM with MAXLEN ~ (approximate) for efficiency
+	// This trims the stream to approximately trimTarget size
+	trimCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	deleted, err := w.redis.XTrimMaxLenApprox(trimCtx, stream, w.trimTarget, 0).Result()
+	if err != nil {
+		log.Warnf("Failed to trim %s: %s", stream, err)
+		return
+	}
+
+	if deleted > 0 {
+		log.Infof("Trimmed %d old messages from %s (target: %d)", deleted, stream, w.trimTarget)
+	}
 }
 
 func (w *DBWriter) processOperationType(ctx context.Context, opType string, ops []OperationData) ([]string, error) {

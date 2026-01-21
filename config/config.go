@@ -127,7 +127,8 @@ type redis struct {
 	DB               int      `koanf:"db"`
 	PoolSize         int      `koanf:"pool_size"`
 	CacheTTLMinutes  int      `koanf:"cache_ttl_minutes"`
-	MaxQueueSize     int64    `koanf:"max_queue_size"`
+	MaxQueueSize     int64    `koanf:"max_queue_size"` // Deprecated - no longer used for MAXLEN
+	StreamTrimTarget int64    `koanf:"stream_trim_target"` // Target size to trim streams to (e.g., 100000)
 	WriterBatchSize  int      `koanf:"writer_batch_size"`
 	WriterWorkers    int      `koanf:"writer_workers"`
 	LoadHotOnStartup bool     `koanf:"load_hot_on_startup"`

@@ -73,11 +73,10 @@ func (q *WriteQueue) QueueWrite(ctx context.Context, writeType string, operation
 
 	stream := q.getStreamForType(writeType)
 
-	// Add to stream
+	// Add to stream (no MAXLEN - workers handle cleanup)
+	// This makes XADD fast (~1ms) without trimming overhead
 	err = q.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: stream,
-		MaxLen: q.maxQueueSize,
-		Approx: true,
 		Values: map[string]interface{}{
 			"data": opBytes,
 		},

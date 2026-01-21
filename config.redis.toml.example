@@ -27,9 +27,18 @@ pool_size = 100
 # - Survives most scanner pauses and short maintenance
 cache_ttl_minutes = 120
 
-# Maximum queue size (protects against memory overflow)
-# With 1M limit, approximately 100MB memory usage
+# Maximum queue size (DEPRECATED - no longer used)
+# Kept for backwards compatibility, but XADD no longer uses MAXLEN
+# Stream trimming is now handled by workers (see stream_trim_target)
 max_queue_size = 1000000
+
+# Stream trim target - workers periodically trim streams to this size
+# This keeps streams lean and Redis fast
+# Recommended: 2-3x your (writer_workers × writer_batch_size)
+# Example: 75 workers × 3000 batch = 225k capacity → set to 100k-200k
+# Lower = faster trimming, less memory
+# Higher = more buffer for bursts
+stream_trim_target = 100000
 
 # Batch size for DB writer workers
 # Each worker processes this many operations per batch

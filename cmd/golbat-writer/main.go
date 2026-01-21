@@ -101,13 +101,18 @@ func main() {
 		batchSize = 500
 	}
 
-	log.Infof("Starting %d DB writer workers (batch size: %d)", numWorkers, batchSize)
+	trimTarget := cfg.Redis.StreamTrimTarget
+	if trimTarget == 0 {
+		trimTarget = 100000 // Default: keep 100k messages
+	}
+
+	log.Infof("Starting %d DB writer workers (batch size: %d, trim target: %d)", numWorkers, batchSize, trimTarget)
 
 	// Start multiple workers
 	workerDone := make(chan error, numWorkers)
 	for i := 0; i < numWorkers; i++ {
 		workerID := fmt.Sprintf("writer-%d", i+1)
-		dbWriter := writer.NewDBWriter(redisClient.GetClient(), db, workerID, batchSize)
+		dbWriter := writer.NewDBWriter(redisClient.GetClient(), db, workerID, batchSize, trimTarget)
 		
 		go func(id string, w *writer.DBWriter) {
 			log.Infof("Worker %s started", id)
