@@ -152,6 +152,13 @@ func saveRouteRecordDirect(db db.DbDetails, route *Route) error {
 
 func (route *Route) updateFromSharedRouteProto(sharedRouteProto *pogo.SharedRouteProto) {
 	route.Name = sharedRouteProto.GetName()
+	// NOTE: Some names have more than 50 runes, which won't fit in our varchar(50).
+	if truncateStr, truncated := util.TruncateUTF8(route.Name, 50); truncated {
+		log.Warnf("truncating name for route id '%s'",
+			route.Id,
+		)
+		route.Name = truncateStr
+	}
 	if sharedRouteProto.GetShortCode() != "" {
 		route.Shortcode = sharedRouteProto.GetShortCode()
 	}

@@ -524,7 +524,7 @@ func clearGymWithLock(ctx context.Context, dbDetails db.DbDetails, gymId string,
 	defer gymMutex.Unlock()
 
 	deleteGymFromCache(gymId)
-	if err := db.ClearOldGyms(ctx, dbDetails, []string{gymId}); err != nil{
+	if err := db.ClearOldGyms(ctx, dbDetails, []string{gymId}); err != nil {
 		log.Errorf("FortTracker: failed to clear gym %s - %s", gymId, err)
 		return
 	}

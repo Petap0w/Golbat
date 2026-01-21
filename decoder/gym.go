@@ -124,7 +124,7 @@ func GetGymRecord(ctx context.Context, db db.DbDetails, fortId string) (*Gym, er
 	}
 
 	// Not in L1 cache = return nil (data will populate when scanned)
-	return nil, nil
+		return nil, nil
 }
 
 func escapeLike(s string) string {
@@ -290,7 +290,13 @@ func (gym *Gym) updateGymFromFortProto(fortData *pogo.FortDetailsOutProto) *Gym 
 	if len(fortData.ImageUrl) > 0 {
 		gym.Url = null.StringFrom(fortData.ImageUrl[0])
 	}
+	
 	gym.Name = null.StringFrom(fortData.Name)
+	// NOTE: Some names have more than 128 runes, which won't fit in our varchar(128).
+	if truncateStr, truncated := util.TruncateUTF8(fortData.Name, 128); truncated {
+		log.Warnf("truncating name for gym id '%s'", gym.Id)
+		gym.Name = null.StringFrom(truncateStr)
+	}
 
 	return gym
 }
@@ -304,7 +310,13 @@ func (gym *Gym) updateGymFromGymInfoOutProto(gymData *pogo.GymGetInfoOutProto) *
 	if len(gymData.Url) > 0 {
 		gym.Url = null.StringFrom(gymData.Url)
 	}
+	
 	gym.Name = null.StringFrom(gymData.Name)
+	// NOTE: Some names have more than 128 runes, which won't fit in our varchar(128).
+	if truncateStr, truncated := util.TruncateUTF8(gymData.Name, 128); truncated {
+		log.Warnf("truncating name for gym id '%s'", gym.Id)
+		gym.Name = null.StringFrom(truncateStr)
+	}
 
 	if gymData.Description == "" {
 		gym.Description = null.NewString("", false)
@@ -380,6 +392,11 @@ func (gym *Gym) updateGymFromGetMapFortsOutProto(fortData *pogo.GetMapFortsOutPr
 	}
 	if !skipName {
 		gym.Name = null.StringFrom(fortData.Name)
+		// NOTE: Some names have more than 128 runes, which won't fit in our varchar(128).
+		if truncateStr, truncated := util.TruncateUTF8(fortData.Name, 128); truncated {
+			log.Warnf("truncating name for gym id '%s'", gym.Id)
+			gym.Name = null.StringFrom(truncateStr)
+		}
 	}
 
 	if gym.Deleted {
@@ -623,11 +640,11 @@ func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
 		val := inMemoryGym.Value()
 		oldGym = &val
 		if !hasChangesGym(oldGym, gym) {
-			if oldGym.Updated > now-900 {
+		if oldGym.Updated > now-900 {
 				// Unchanged and recently updated
-				if hasInternalChangesGym(oldGym, gym) {
-					areas := MatchStatsGeofence(gym.Lat, gym.Lon)
-					createGymWebhooks(oldGym, gym, areas)
+			if hasInternalChangesGym(oldGym, gym) {
+				areas := MatchStatsGeofence(gym.Lat, gym.Lon)
+				createGymWebhooks(oldGym, gym, areas)
 					setGymCache(gym.Id, *gym, ttlcache.DefaultTTL)
 				}
 				return
