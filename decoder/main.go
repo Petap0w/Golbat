@@ -58,8 +58,8 @@ type webhooksSenderInterface interface {
 
 var webhooksSender webhooksSenderInterface
 var statsCollector stats_collector.StatsCollector
-var pokestopCache *ttlcache.Cache[string, Pokestop]
-var gymCache *ttlcache.Cache[string, Gym]
+var pokestopCache []*ttlcache.Cache[string, Pokestop] // Sharded to reduce lock contention
+var gymCache []*ttlcache.Cache[string, Gym]           // Sharded to reduce lock contention
 var stationCache *ttlcache.Cache[string, Station]
 var tappableCache *ttlcache.Cache[uint64, Tappable]
 var weatherCache *ttlcache.Cache[int64, Weather]
@@ -134,16 +134,69 @@ func deletePokemonFromCache(key uint64) {
 	getPokemonCache(key).Delete(key)
 }
 
-func initDataCache() {
-	pokestopCache = ttlcache.New[string, Pokestop](
-		ttlcache.WithTTL[string, Pokestop](60 * time.Minute),
-	)
-	go pokestopCache.Start()
+// Pokestop cache helpers (sharded)
+func getPokestopCache(key string) *ttlcache.Cache[string, Pokestop] {
+	// Simple hash: sum of bytes mod shard count
+	hash := uint32(0)
+	for i := 0; i < len(key); i++ {
+		hash = hash*31 + uint32(key[i])
+	}
+	return pokestopCache[hash%uint32(len(pokestopCache))]
+}
 
-	gymCache = ttlcache.New[string, Gym](
-		ttlcache.WithTTL[string, Gym](60 * time.Minute),
-	)
-	go gymCache.Start()
+func setPokestopCache(key string, value Pokestop, ttl time.Duration) {
+	getPokestopCache(key).Set(key, value, ttl)
+}
+
+func getPokestopFromCache(key string) *ttlcache.Item[string, Pokestop] {
+	return getPokestopCache(key).Get(key)
+}
+
+func deletePokestopFromCache(key string) {
+	getPokestopCache(key).Delete(key)
+}
+
+// Gym cache helpers (sharded)
+func getGymCache(key string) *ttlcache.Cache[string, Gym] {
+	// Simple hash: sum of bytes mod shard count
+	hash := uint32(0)
+	for i := 0; i < len(key); i++ {
+		hash = hash*31 + uint32(key[i])
+	}
+	return gymCache[hash%uint32(len(gymCache))]
+}
+
+func setGymCache(key string, value Gym, ttl time.Duration) {
+	getGymCache(key).Set(key, value, ttl)
+}
+
+func getGymFromCache(key string) *ttlcache.Item[string, Gym] {
+	return getGymCache(key).Get(key)
+}
+
+func deleteGymFromCache(key string) {
+	getGymCache(key).Delete(key)
+}
+
+func initDataCache() {
+	// Pokestops are high-volume. Use sharded cache array to reduce lock contention
+	// Similar to Pokemon, use NumCPU shards for ~63% concurrency
+	pokestopCache = make([]*ttlcache.Cache[string, Pokestop], runtime.NumCPU())
+	for i := 0; i < len(pokestopCache); i++ {
+		pokestopCache[i] = ttlcache.New[string, Pokestop](
+			ttlcache.WithTTL[string, Pokestop](60 * time.Minute),
+		)
+		go pokestopCache[i].Start()
+	}
+
+	// Gyms are high-volume. Use sharded cache array to reduce lock contention
+	gymCache = make([]*ttlcache.Cache[string, Gym], runtime.NumCPU())
+	for i := 0; i < len(gymCache); i++ {
+		gymCache[i] = ttlcache.New[string, Gym](
+			ttlcache.WithTTL[string, Gym](60 * time.Minute),
+		)
+		go gymCache[i].Start()
+	}
 
 	stationCache = ttlcache.New[string, Station](
 		ttlcache.WithTTL[string, Station](60 * time.Minute),
@@ -267,11 +320,17 @@ func InitialiseOhbem() {
 }
 
 func ClearPokestopCache() {
-	pokestopCache.DeleteAll()
+	// Clear all shards
+	for i := 0; i < len(pokestopCache); i++ {
+		pokestopCache[i].DeleteAll()
+	}
 }
 
 func ClearGymCache() {
-	gymCache.DeleteAll()
+	// Clear all shards
+	for i := 0; i < len(gymCache); i++ {
+		gymCache[i].DeleteAll()
+	}
 }
 
 const floatTolerance = 0.000001

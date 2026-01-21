@@ -109,7 +109,7 @@ func GetPokestopRecord(ctx context.Context, db db.DbDetails, fortId string) (*Po
 	// L1 CACHE ONLY - no blocking I/O!
 	// Pokestops are NOT stored in Redis (only queued for DB writes)
 	// External services read from DB directly
-	stop := pokestopCache.Get(fortId)
+	stop := getPokestopFromCache(fortId)
 	if stop != nil {
 		pokestop := stop.Value()
 		return &pokestop, nil
@@ -733,7 +733,7 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 	// Only check L1 cache (no blocking I/O!)
 	// Cache miss = just save (accept duplicate writes, avoid blocking reads)
 	var oldPokestop *Pokestop
-	inMemoryPokestop := pokestopCache.Get(pokestop.Id)
+	inMemoryPokestop := getPokestopFromCache(pokestop.Id)
 	now := time.Now().Unix()
 
 	if inMemoryPokestop != nil {
@@ -750,7 +750,7 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 	pokestop.Updated = now
 
 	// Update L1 cache immediately for read consistency
-	pokestopCache.Set(pokestop.Id, *pokestop, ttlcache.DefaultTTL)
+	setPokestopCache(pokestop.Id, *pokestop, ttlcache.DefaultTTL)
 
 	// NO L2 CACHE - pokestops only stored in L1 + queued for DB write
 	// External services read from DB directly

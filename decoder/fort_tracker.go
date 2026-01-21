@@ -523,8 +523,8 @@ func clearGymWithLock(ctx context.Context, dbDetails db.DbDetails, gymId string,
 	gymMutex.Lock()
 	defer gymMutex.Unlock()
 
-	gymCache.Delete(gymId)
-	if err := db.ClearOldGyms(ctx, dbDetails, []string{gymId}); err != nil {
+	deleteGymFromCache(gymId)
+	if err := db.ClearOldGyms(ctx, dbDetails, []string{gymId}); err != nil{
 		log.Errorf("FortTracker: failed to clear gym %s - %s", gymId, err)
 		return
 	}
@@ -545,7 +545,7 @@ func clearPokestopWithLock(ctx context.Context, dbDetails db.DbDetails, stopId s
 	pokestopMutex.Lock()
 	defer pokestopMutex.Unlock()
 
-	pokestopCache.Delete(stopId)
+	deletePokestopFromCache(stopId)
 	if err := db.ClearOldPokestops(ctx, dbDetails, []string{stopId}); err != nil {
 		log.Errorf("FortTracker: failed to clear pokestop %s - %s", stopId, err)
 		return

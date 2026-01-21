@@ -117,7 +117,7 @@ func GetGymRecord(ctx context.Context, db db.DbDetails, fortId string) (*Gym, er
 	// L1 CACHE ONLY - no blocking I/O!
 	// Gyms are NOT stored in Redis (only queued for DB writes)
 	// External services read from DB directly
-	inMemoryGym := gymCache.Get(fortId)
+	inMemoryGym := getGymFromCache(fortId)
 	if inMemoryGym != nil {
 		gym := inMemoryGym.Value()
 		return &gym, nil
@@ -616,7 +616,7 @@ func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
 	// Only check L1 cache (no blocking I/O!)
 	// Cache miss = just save (accept duplicate writes, avoid blocking reads)
 	var oldGym *Gym
-	inMemoryGym := gymCache.Get(gym.Id)
+	inMemoryGym := getGymFromCache(gym.Id)
 	now := time.Now().Unix()
 
 	if inMemoryGym != nil {
@@ -628,7 +628,7 @@ func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
 				if hasInternalChangesGym(oldGym, gym) {
 					areas := MatchStatsGeofence(gym.Lat, gym.Lon)
 					createGymWebhooks(oldGym, gym, areas)
-					gymCache.Set(gym.Id, *gym, ttlcache.DefaultTTL)
+					setGymCache(gym.Id, *gym, ttlcache.DefaultTTL)
 				}
 				return
 			}
@@ -638,7 +638,7 @@ func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
 	gym.Updated = now
 
 	// Update L1 cache immediately for read consistency
-	gymCache.Set(gym.Id, *gym, ttlcache.DefaultTTL)
+	setGymCache(gym.Id, *gym, ttlcache.DefaultTTL)
 
 	// NO L2 CACHE - gyms only stored in L1 + queued for DB write
 	// External services read from DB directly
