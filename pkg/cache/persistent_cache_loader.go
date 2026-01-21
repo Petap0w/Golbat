@@ -207,6 +207,19 @@ func streamTableToCacheDirect(
 	whereClause string,
 	scanFunc func(*sqlx.Rows) error,
 ) int64 {
+	// Count total rows first for progress %
+	countQuery := "SELECT COUNT(*) FROM " + tableName
+	if whereClause != "" {
+		countQuery += " WHERE " + whereClause
+	}
+	var totalRows int64
+	if err := dbConn.GetContext(ctx, &totalRows, countQuery); err != nil {
+		log.Warnf("Failed to count %s rows: %v (progress % will not be shown)", tableName, err)
+		totalRows = 0 // Continue without total
+	} else {
+		log.Infof("Loading %s from database... (total: %d rows)", tableName, totalRows)
+	}
+
 	query := "SELECT * FROM " + tableName
 	if whereClause != "" {
 		query += " WHERE " + whereClause
@@ -237,7 +250,12 @@ func streamTableToCacheDirect(
 		// Progress logging every 10 seconds
 		if time.Since(lastLog) > 10*time.Second {
 			elapsed := time.Since(start)
+			if totalRows > 0 {
+				pct := float64(count) / float64(totalRows) * 100
+				log.Infof("Loading %s: %d/%d (%.1f%%, %.1f/sec)...", tableName, count, totalRows, pct, float64(count)/elapsed.Seconds())
+			} else {
 			log.Infof("Loading %s: %d loaded (%.1f/sec)...", tableName, count, float64(count)/elapsed.Seconds())
+			}
 			lastLog = time.Now()
 		}
 	}
@@ -262,7 +280,7 @@ func loadPokestopsFromDB(ctx context.Context, dbConn *sqlx.DB, setter Persistent
 		Lon                          float64     `db:"lon"`
 		Name                         null.String `db:"name"`
 		Url                          null.String `db:"url"`
-		Enabled                      null.Bool   `db:"enabled"`
+		Enabled                      null.Int    `db:"enabled"` // TINYINT unsigned (0/1), not BOOL
 		LureExpireTimestamp          null.Int    `db:"lure_expire_timestamp"`
 		LastModifiedTimestamp        null.Int    `db:"last_modified_timestamp"`
 		Updated                      int64       `db:"updated"`
@@ -291,7 +309,7 @@ func loadPokestopsFromDB(ctx context.Context, dbConn *sqlx.DB, setter Persistent
 		AlternativeQuestRewardAmount null.Int    `db:"alternative_quest_reward_amount"` // VIRTUAL/GENERATED
 		AlternativeQuestExpiry       null.Int    `db:"alternative_quest_expiry"`
 		CellId                       null.Int    `db:"cell_id"`
-		Deleted                      bool        `db:"deleted"`
+		Deleted                      int         `db:"deleted"` // TINYINT unsigned (0/1), not BOOL
 		LureId                       null.Int    `db:"lure_id"`
 		FirstSeenTimestamp           int64       `db:"first_seen_timestamp"`
 		SponsorId                    null.Int    `db:"sponsor_id"`
@@ -354,17 +372,17 @@ func loadGymsFromDB(ctx context.Context, dbConn *sqlx.DB, setter PersistentCache
 		AvailbleSlots           null.Int    `db:"availble_slots"` // VIRTUAL (typo in schema but exists)
 		TeamId                  null.Int    `db:"team_id"`
 		RaidLevel               null.Int    `db:"raid_level"`
-		Enabled                 null.Bool   `db:"enabled"`
-		ExRaidEligible          null.Bool   `db:"ex_raid_eligible"`
-		InBattle                null.Bool   `db:"in_battle"`
+		Enabled                 null.Int    `db:"enabled"`          // TINYINT unsigned (0/1), not BOOL
+		ExRaidEligible          null.Int    `db:"ex_raid_eligible"` // TINYINT unsigned (0/1), not BOOL
+		InBattle                null.Int    `db:"in_battle"`        // TINYINT unsigned (0/1), not BOOL
 		RaidPokemonMove1        null.Int    `db:"raid_pokemon_move_1"`
 		RaidPokemonMove2        null.Int    `db:"raid_pokemon_move_2"`
 		RaidPokemonForm         null.Int    `db:"raid_pokemon_form"`
 		RaidPokemonAlignment    null.Int    `db:"raid_pokemon_alignment"` // Added in migration 18
 		RaidPokemonCp           null.Int    `db:"raid_pokemon_cp"`
-		RaidIsExclusive         null.Bool   `db:"raid_is_exclusive"`
+		RaidIsExclusive         null.Int    `db:"raid_is_exclusive"` // TINYINT unsigned (0/1), not BOOL
 		CellId                  null.Int    `db:"cell_id"`
-		Deleted                 bool        `db:"deleted"`
+		Deleted                 int         `db:"deleted"` // TINYINT unsigned (0/1), not BOOL
 		TotalCp                 null.Int    `db:"total_cp"`
 		FirstSeenTimestamp      int64       `db:"first_seen_timestamp"`
 		RaidPokemonGender       null.Int    `db:"raid_pokemon_gender"`

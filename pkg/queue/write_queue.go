@@ -37,13 +37,35 @@ type WriteOperation struct {
 }
 
 type WriteQueue struct {
-	client *redis.Client
+	client     *redis.Client
+	buffer     chan *queuedWrite
+	bufferSize int
+}
+
+type queuedWrite struct {
+	stream  string
+	opBytes []byte
+	retries int
 }
 
 func NewWriteQueue(client *redis.Client) *WriteQueue {
-	return &WriteQueue{
-		client: client,
+	bufferSize := 100000 // 100K in-memory buffer
+
+	q := &WriteQueue{
+		client:     client,
+		buffer:     make(chan *queuedWrite, bufferSize),
+		bufferSize: bufferSize,
 	}
+
+	// Start background workers to drain buffer
+	workerCount := 10 // 10 parallel workers
+	for i := 0; i < workerCount; i++ {
+		go q.bufferWorker(i)
+	}
+
+	log.Infof("Write queue initialized with %d buffer size, %d workers", bufferSize, workerCount)
+
+	return q
 }
 
 func (q *WriteQueue) QueueWrite(ctx context.Context, writeType string, operation string, data interface{}) error {
@@ -67,20 +89,34 @@ func (q *WriteQueue) QueueWrite(ctx context.Context, writeType string, operation
 
 	stream := q.getStreamForType(writeType)
 
-	// Add to stream (no MAXLEN - workers handle cleanup)
-	// This makes XADD fast (~1ms) without trimming overhead
-	err = q.client.XAdd(ctx, &redis.XAddArgs{
-		Stream: stream,
-		Values: map[string]interface{}{
-			"data": opBytes,
-		},
-	}).Err()
-
-	if err != nil {
-		return fmt.Errorf("failed to add to stream: %w", err)
+	// Push to in-memory buffer (non-blocking) - FAST PATH!
+	write := &queuedWrite{
+		stream:  stream,
+		opBytes: opBytes,
+		retries: 0,
 	}
 
-	return nil
+	select {
+	case q.buffer <- write:
+		// Successfully queued in memory - return immediately (microseconds)
+		return nil
+	default:
+		// Buffer full - fall back to direct XADD (will block, but rare)
+		log.Warnf("Write buffer full (%d items), falling back to direct Redis XADD", q.bufferSize)
+
+		err = q.client.XAdd(ctx, &redis.XAddArgs{
+			Stream: stream,
+			Values: map[string]interface{}{
+				"data": opBytes,
+			},
+		}).Err()
+
+		if err != nil {
+			return fmt.Errorf("failed to add to stream: %w", err)
+		}
+
+		return nil
+	}
 }
 
 func (q *WriteQueue) getStreamForType(writeType string) string {
@@ -119,7 +155,51 @@ func (q *WriteQueue) GetQueueSizes(ctx context.Context) (map[string]int64, error
 	return sizes, nil
 }
 
+// bufferWorker drains the in-memory buffer and sends to Redis
+func (q *WriteQueue) bufferWorker(id int) {
+	log.Debugf("Buffer worker %d started", id)
+
+	for write := range q.buffer {
+		// Create a fresh context for each XADD (not tied to GRPC request)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+		err := q.client.XAdd(ctx, &redis.XAddArgs{
+			Stream: write.stream,
+			Values: map[string]interface{}{
+				"data": write.opBytes,
+			},
+		}).Err()
+
+		cancel()
+
+		if err != nil {
+			// Retry up to 3 times with exponential backoff
+			write.retries++
+			if write.retries < 3 {
+				// Requeue for retry
+				select {
+				case q.buffer <- write:
+					log.Debugf("Requeued write (retry %d/3)", write.retries)
+				default:
+					log.Errorf("Failed to requeue write after Redis error: %v", err)
+				}
+			} else {
+				log.Errorf("Dropped write after 3 retries to %s: %v", write.stream, err)
+			}
+		}
+	}
+
+	log.Warnf("Buffer worker %d stopped (channel closed)", id)
+}
+
 func (q *WriteQueue) Flush(ctx context.Context) error {
+	// Drain in-memory buffer first
+	log.Infof("Flushing write buffer (%d items)...", len(q.buffer))
+	for len(q.buffer) > 0 {
+		time.Sleep(100 * time.Millisecond)
+	}
+	log.Info("Write buffer drained")
+
 	// Create a new context with timeout for flush operation
 	// Don't use the parent context which might already be canceled
 	flushCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
