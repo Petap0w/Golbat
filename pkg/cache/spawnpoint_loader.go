@@ -159,6 +159,9 @@ func (s *SpawnpointLoader) LoadHotSpawnpointsOnStartup(ctx context.Context, l1Se
 
 	// Batch write to Redis and L1 cache in chunks
 	chunkSize := 10000
+	totalLoaded := 0
+	lastProgressLog := time.Now()
+
 	for i := 0; i < len(records); i += chunkSize {
 		end := i + chunkSize
 		if end > len(records) {
@@ -186,6 +189,16 @@ func (s *SpawnpointLoader) LoadHotSpawnpointsOnStartup(ctx context.Context, l1Se
 		if err := s.l2Cache.BatchSetSpawnpoints(ctx, toRedis); err != nil {
 			log.Errorf("Failed to write chunk %d-%d to Redis: %s", i, end, err)
 			continue
+		}
+
+		totalLoaded += len(chunk)
+
+		// Log progress every 500k spawnpoints or every 10 seconds
+		if totalLoaded%500000 == 0 || time.Since(lastProgressLog) > 10*time.Second {
+			progress := float64(totalLoaded) / float64(len(records)) * 100
+			log.Infof("Loading progress: %d/%d spawnpoints (%.1f%%) - elapsed: %s",
+				totalLoaded, len(records), progress, time.Since(startTime))
+			lastProgressLog = time.Now()
 		}
 
 		log.Debugf("Loaded spawnpoints %d-%d to L1 cache and Redis", i, end)
