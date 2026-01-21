@@ -12,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v4"
 
+	"golbat/config"
 	"golbat/db"
 	"golbat/pogo"
 	"golbat/tz"
@@ -740,7 +741,9 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 		val := inMemoryPokestop.Value()
 		oldPokestop = &val
 		if !hasChangesPokestop(oldPokestop, pokestop) {
-			if oldPokestop.Updated > now-900 {
+			// Force update after configured interval (default: 15 min)
+			forceUpdateInterval := config.Config.Tuning.GetForceUpdateInterval("pokestop")
+			if oldPokestop.Updated > now-forceUpdateInterval {
 				// Unchanged and recently updated, skip save
 				return
 			}
@@ -751,6 +754,13 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 
 	// Update L1 cache immediately for read consistency
 	setPokestopCache(pokestop.Id, *pokestop, ttlcache.DefaultTTL)
+
+	// Update Redis fort cache (async, non-blocking) for fast restart + quest preservation
+	if redisEnabled {
+		if jsonData, err := json.Marshal(pokestop); err == nil {
+			updateFortCacheAsync("pokestop", pokestop.Id, jsonData)
+		}
+	}
 
 	// NO L2 CACHE - pokestops only stored in L1 + queued for DB write
 	// External services read from DB directly

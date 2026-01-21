@@ -66,6 +66,15 @@ max_pokemon_results = 3000  # Maximum number of pokemon to return
 extended_timeout = false
 profile_routes = false
 
+# Force update intervals (seconds) - objects are re-saved after this interval even if unchanged
+# This confirms objects still exist and prevents stale data
+# Adjust based on how frequently each type changes:
+force_update_pokestop = 900    # 15 minutes (quests/lures change frequently)
+force_update_gym = 900         # 15 minutes (raids change frequently)
+force_update_station = 3600    # 1 hour (battles don't change often)
+force_update_route = 86400     # 24 hours (routes are very static)
+force_update_spawnpoint = 86400  # 24 hours (spawn times are very static)
+
 [weather]
 proactive_iv_switching = true       # Enable proactive IV switching upon weather changes (default: true)
 proactive_iv_switching_to_db = false # Write proactive IV changes to database (default: false)

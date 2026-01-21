@@ -132,6 +132,8 @@ type redis struct {
 	WriterBatchSize  int      `koanf:"writer_batch_size"`
 	WriterWorkers    int      `koanf:"writer_workers"`
 	LoadHotOnStartup bool     `koanf:"load_hot_on_startup"`
+	FortCacheEnabled bool     `koanf:"fort_cache_enabled"` // Enable 24h Redis cache for forts (fast restart + quest data preservation)
+	FortCacheTTLHours int     `koanf:"fort_cache_ttl_hours"` // How long to keep forts in Redis cache (default: 24)
 }
 
 type tuning struct {
@@ -139,6 +141,14 @@ type tuning struct {
 	MaxPokemonResults  int     `koanf:"max_pokemon_results"`
 	MaxPokemonDistance float64 `koanf:"max_pokemon_distance"`
 	ProfileRoutes      bool    `koanf:"profile_routes"`
+	
+	// Force update intervals (seconds) - even if object hasn't changed
+	// Objects are re-saved after this interval to confirm they still exist
+	ForceUpdatePokestop  int64 `koanf:"force_update_pokestop"`  // Default: 900 (15 min)
+	ForceUpdateGym       int64 `koanf:"force_update_gym"`       // Default: 900 (15 min)
+	ForceUpdateStation   int64 `koanf:"force_update_station"`   // Default: 3600 (1 hour)
+	ForceUpdateRoute     int64 `koanf:"force_update_route"`     // Default: 86400 (24 hours)
+	ForceUpdateSpawnpoint int64 `koanf:"force_update_spawnpoint"` // Default: 86400 (24 hours)
 }
 
 type scanRule struct {
@@ -161,6 +171,39 @@ type scanRule struct {
 type weather struct {
 	ProactiveIVSwitching     bool `koanf:"proactive_iv_switching"`
 	ProactiveIVSwitchingToDB bool `koanf:"proactive_iv_switching_to_db"`
+}
+
+// GetForceUpdateInterval returns the force update interval for a data type with sensible defaults
+func (t tuning) GetForceUpdateInterval(dataType string) int64 {
+	switch dataType {
+	case "pokestop":
+		if t.ForceUpdatePokestop > 0 {
+			return t.ForceUpdatePokestop
+		}
+		return 900 // 15 minutes - quests/lures change frequently
+	case "gym":
+		if t.ForceUpdateGym > 0 {
+			return t.ForceUpdateGym
+		}
+		return 900 // 15 minutes - raids change frequently
+	case "station":
+		if t.ForceUpdateStation > 0 {
+			return t.ForceUpdateStation
+		}
+		return 3600 // 1 hour - battles don't change often
+	case "route":
+		if t.ForceUpdateRoute > 0 {
+			return t.ForceUpdateRoute
+		}
+		return 86400 // 24 hours - routes are very static
+	case "spawnpoint":
+		if t.ForceUpdateSpawnpoint > 0 {
+			return t.ForceUpdateSpawnpoint
+		}
+		return 86400 // 24 hours - spawn times are very static
+	default:
+		return 900 // Default: 15 minutes
+	}
 }
 
 var Config configDefinition

@@ -187,12 +187,22 @@ func main() {
 			log.Info("Loading hot data into Redis...")
 
 			// Load hot spawnpoints (last 7 days) into BOTH L1 and Redis
-			// NOTE: Pokestops/gyms are NOT loaded to Redis - they use L1 cache only
 			if err := spawnpointLoader.LoadHotSpawnpointsOnStartup(ctx, decoder.PopulateSpawnpointL1Cache); err != nil {
 				log.Errorf("Failed to load hot spawnpoints: %s", err)
 			}
 
 			log.Info("Hot data loaded into Redis")
+		}
+
+		// Load forts from Redis cache (fast restart + quest data preservation)
+		if cfg.Redis.FortCacheEnabled {
+			// Set Redis client in decoder for fort cache updates
+			decoder.SetRedisClient(redisClient.GetClient())
+			
+			fortSetter := decoder.GetFortCacheSetter()
+			if err := cache.LoadFortsOnStartup(ctx, redisClient.GetClient(), db, fortSetter); err != nil {
+				log.Errorf("Failed to load forts: %s", err)
+			}
 		}
 	} else {
 		log.Info("Redis disabled, using direct DB mode")

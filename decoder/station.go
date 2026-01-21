@@ -4,15 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"golbat/db"
-	"golbat/pogo"
-	"golbat/util"
-	"golbat/webhooks"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v4"
+
+	"golbat/config"
+	"golbat/db"
+	"golbat/pogo"
+	"golbat/util"
+	"golbat/webhooks"
 )
 
 type Station struct {
@@ -64,8 +66,10 @@ func saveStationRecord(ctx context.Context, db db.DbDetails, station *Station) {
 	oldStation, _ := getStationRecord(ctx, db, station.Id)
 	now := time.Now().Unix()
 	if oldStation != nil && !hasChangesStation(oldStation, station) {
-		if oldStation.Updated > now-900 {
-			// if a gym is unchanged, but we did see it again after 15 minutes, then save again
+		// Force update after configured interval (default: 1 hour)
+		forceUpdateInterval := config.Config.Tuning.GetForceUpdateInterval("station")
+		if oldStation.Updated > now-forceUpdateInterval {
+			// Unchanged and recently updated, skip save
 			return
 		}
 	}
@@ -74,6 +78,13 @@ func saveStationRecord(ctx context.Context, db db.DbDetails, station *Station) {
 
 	// Update L1 cache immediately for read consistency
 	stationCache.Set(station.Id, *station, ttlcache.DefaultTTL)
+
+	// Update Redis fort cache (async, non-blocking) for fast restart + battle data preservation
+	if redisEnabled {
+		if jsonData, err := json.Marshal(station); err == nil {
+			updateFortCacheAsync("station", station.Id, jsonData)
+		}
+	}
 
 	// Queue write to database
 	if redisEnabled {

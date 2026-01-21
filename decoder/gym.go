@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v4"
 
+	"golbat/config"
 	"golbat/db"
 	"golbat/pogo"
 	"golbat/util"
@@ -124,7 +125,7 @@ func GetGymRecord(ctx context.Context, db db.DbDetails, fortId string) (*Gym, er
 	}
 
 	// Not in L1 cache = return nil (data will populate when scanned)
-		return nil, nil
+	return nil, nil
 }
 
 func escapeLike(s string) string {
@@ -290,7 +291,7 @@ func (gym *Gym) updateGymFromFortProto(fortData *pogo.FortDetailsOutProto) *Gym 
 	if len(fortData.ImageUrl) > 0 {
 		gym.Url = null.StringFrom(fortData.ImageUrl[0])
 	}
-	
+
 	gym.Name = null.StringFrom(fortData.Name)
 	// NOTE: Some names have more than 128 runes, which won't fit in our varchar(128).
 	if truncateStr, truncated := util.TruncateUTF8(fortData.Name, 128); truncated {
@@ -310,7 +311,7 @@ func (gym *Gym) updateGymFromGymInfoOutProto(gymData *pogo.GymGetInfoOutProto) *
 	if len(gymData.Url) > 0 {
 		gym.Url = null.StringFrom(gymData.Url)
 	}
-	
+
 	gym.Name = null.StringFrom(gymData.Name)
 	// NOTE: Some names have more than 128 runes, which won't fit in our varchar(128).
 	if truncateStr, truncated := util.TruncateUTF8(gymData.Name, 128); truncated {
@@ -640,11 +641,13 @@ func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
 		val := inMemoryGym.Value()
 		oldGym = &val
 		if !hasChangesGym(oldGym, gym) {
-		if oldGym.Updated > now-900 {
+			// Force update after configured interval (default: 15 min)
+			forceUpdateInterval := config.Config.Tuning.GetForceUpdateInterval("gym")
+			if oldGym.Updated > now-forceUpdateInterval {
 				// Unchanged and recently updated
-			if hasInternalChangesGym(oldGym, gym) {
-				areas := MatchStatsGeofence(gym.Lat, gym.Lon)
-				createGymWebhooks(oldGym, gym, areas)
+				if hasInternalChangesGym(oldGym, gym) {
+					areas := MatchStatsGeofence(gym.Lat, gym.Lon)
+					createGymWebhooks(oldGym, gym, areas)
 					setGymCache(gym.Id, *gym, ttlcache.DefaultTTL)
 				}
 				return
@@ -656,6 +659,13 @@ func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
 
 	// Update L1 cache immediately for read consistency
 	setGymCache(gym.Id, *gym, ttlcache.DefaultTTL)
+
+	// Update Redis fort cache (async, non-blocking) for fast restart + data preservation
+	if redisEnabled {
+		if jsonData, err := json.Marshal(gym); err == nil {
+			updateFortCacheAsync("gym", gym.Id, jsonData)
+		}
+	}
 
 	// NO L2 CACHE - gyms only stored in L1 + queued for DB write
 	// External services read from DB directly

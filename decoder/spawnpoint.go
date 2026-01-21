@@ -3,14 +3,16 @@ package decoder
 import (
 	"context"
 	"database/sql"
-	"golbat/db"
-	"golbat/pogo"
 	"strconv"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v4"
+
+	"golbat/config"
+	"golbat/db"
+	"golbat/pogo"
 )
 
 // Spawnpoint struct.
@@ -50,14 +52,14 @@ func getSpawnpointRecord(ctx context.Context, db db.DbDetails, spawnpointId int6
 		records, err := spawnpointBatch.BatchLoad(ctx, []int64{spawnpointId})
 		if err == nil {
 			if record, found := records[spawnpointId]; found {
-			spawnpoint := &Spawnpoint{
-				Id:         record.Id,
-				Lat:        record.Lat,
-				Lon:        record.Lon,
-				DespawnSec: null.IntFromPtr(record.DespawnSec),
-				Updated:    record.Updated,
-				LastSeen:   record.LastSeen,
-			}
+				spawnpoint := &Spawnpoint{
+					Id:         record.Id,
+					Lat:        record.Lat,
+					Lon:        record.Lon,
+					DespawnSec: null.IntFromPtr(record.DespawnSec),
+					Updated:    record.Updated,
+					LastSeen:   record.LastSeen,
+				}
 				return spawnpoint, nil
 			}
 		}
@@ -154,8 +156,14 @@ func spawnpointUpdateFromWild(ctx context.Context, db db.DbDetails, wildPokemon 
 func spawnpointUpdate(ctx context.Context, db db.DbDetails, spawnpoint *Spawnpoint) {
 	oldSpawnpoint, _ := getSpawnpointRecord(ctx, db, spawnpoint.Id)
 
+	now := time.Now().Unix()
 	if oldSpawnpoint != nil && !hasChangesSpawnpoint(oldSpawnpoint, spawnpoint) {
-		return
+		// Force update after configured interval (default: 24 hours)
+		// Confirms spawnpoint still exists even if spawn time unchanged
+		forceUpdateInterval := config.Config.Tuning.GetForceUpdateInterval("spawnpoint")
+		if oldSpawnpoint.Updated > now-forceUpdateInterval {
+			return
+		}
 	}
 
 	spawnpoint.Updated = time.Now().Unix()

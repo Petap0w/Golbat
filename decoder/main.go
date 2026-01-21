@@ -2,6 +2,7 @@ package decoder
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"runtime"
@@ -643,4 +644,84 @@ func SetWebhooksSender(whSender webhooksSenderInterface) {
 
 func SetStatsCollector(collector stats_collector.StatsCollector) {
 	statsCollector = collector
+}
+
+// FortCacheSetter implements cache.FortSetter for loading forts into L1 cache
+type FortCacheSetter struct{}
+
+// SetPokestop populates L1 cache with pokestop data from JSON
+func (f *FortCacheSetter) SetPokestop(id string, data []byte) error {
+	var stop Pokestop
+	if err := json.Unmarshal(data, &stop); err != nil {
+		return err
+	}
+	setPokestopCache(id, stop, ttlcache.DefaultTTL)
+	return nil
+}
+
+// SetGym populates L1 cache with gym data from JSON
+func (f *FortCacheSetter) SetGym(id string, data []byte) error {
+	var gym Gym
+	if err := json.Unmarshal(data, &gym); err != nil {
+		return err
+	}
+	setGymCache(id, gym, ttlcache.DefaultTTL)
+	return nil
+}
+
+// SetStation populates L1 cache with station data from JSON
+func (f *FortCacheSetter) SetStation(id string, data []byte) error {
+	var station Station
+	if err := json.Unmarshal(data, &station); err != nil {
+		return err
+	}
+	stationCache.Set(id, station, ttlcache.DefaultTTL)
+	return nil
+}
+
+// SetRoute populates L1 cache with route data from JSON
+func (f *FortCacheSetter) SetRoute(id string, data []byte) error {
+	var route Route
+	if err := json.Unmarshal(data, &route); err != nil {
+		return err
+	}
+	routeCache.Set(id, route, ttlcache.DefaultTTL)
+	return nil
+}
+
+// GetFortCacheSetter returns a FortSetter for loading forts
+func GetFortCacheSetter() *FortCacheSetter {
+	return &FortCacheSetter{}
+}
+
+// updateFortCacheAsync updates Redis fort cache asynchronously
+// Uses global redisClient from redis_bridge.go
+func updateFortCacheAsync(fortType string, id string, data []byte) {
+	if redisClient == nil || !redisEnabled {
+		return
+	}
+	
+	cfg := config.Config.Redis
+	if !cfg.FortCacheEnabled {
+		return
+	}
+	
+	// Run async for non-blocking behavior (hundreds of thousands per second)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		
+		hashKey := "fort_cache:" + fortType
+		ttl := time.Duration(cfg.FortCacheTTLHours) * time.Hour
+		
+		// Use pipeline for efficiency (single round trip)
+		pipe := redisClient.Pipeline()
+		pipe.HSet(ctx, hashKey, id, data)
+		pipe.Expire(ctx, hashKey, ttl)
+		
+		if _, err := pipe.Exec(ctx); err != nil {
+			// Don't spam logs, this is non-critical
+			log.Debugf("Failed to update %s cache for %s: %v", fortType, id, err)
+		}
+	}()
 }

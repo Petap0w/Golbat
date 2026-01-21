@@ -3,6 +3,8 @@ package decoder
 import (
 	"context"
 	
+	"github.com/redis/go-redis/v9"
+	
 	"golbat/pkg/cache"
 	"golbat/pkg/queue"
 )
@@ -12,6 +14,7 @@ var (
 	l2Cache         *cache.L2Cache
 	writeQueue      *queue.WriteQueue
 	spawnpointBatch *cache.SpawnpointLoader
+	redisClient     *redis.Client
 	redisEnabled    bool
 )
 
@@ -21,6 +24,11 @@ func InitRedis(l2 *cache.L2Cache, wq *queue.WriteQueue, spBatch *cache.Spawnpoin
 	writeQueue = wq
 	spawnpointBatch = spBatch
 	redisEnabled = l2 != nil && wq != nil
+}
+
+// SetRedisClient sets the Redis client for fort cache updates
+func SetRedisClient(client *redis.Client) {
+	redisClient = client
 }
 
 // IsRedisEnabled returns whether Redis is enabled

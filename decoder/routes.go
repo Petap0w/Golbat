@@ -4,14 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"golbat/db"
-	"golbat/pogo"
-	"golbat/util"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v4"
+
+	"golbat/config"
+	"golbat/db"
+	"golbat/pogo"
+	"golbat/util"
 )
 
 type Route struct {
@@ -77,7 +79,9 @@ func saveRouteRecord(db db.DbDetails, route *Route) error {
 	oldRoute, _ := getRouteRecord(db, route.Id)
 
 	if oldRoute != nil && !hasChangesRoute(oldRoute, route) {
-		if oldRoute.Updated > time.Now().Unix()-900 {
+		// Force update after configured interval (default: 24 hours)
+		forceUpdateInterval := config.Config.Tuning.GetForceUpdateInterval("route")
+		if oldRoute.Updated > time.Now().Unix()-forceUpdateInterval {
 			return nil
 		}
 	}
@@ -85,8 +89,15 @@ func saveRouteRecord(db db.DbDetails, route *Route) error {
 	// Update L1 cache immediately
 	routeCache.Set(route.Id, *route, ttlcache.DefaultTTL)
 
-	// Queue write to database
+	// Update Redis fort cache (async, non-blocking) for fast restart + route data preservation
 	ctx := context.TODO()
+	if redisEnabled {
+		if jsonData, err := json.Marshal(route); err == nil {
+			updateFortCacheAsync("route", route.Id, jsonData)
+		}
+	}
+
+	// Queue write to database
 	if redisEnabled {
 		if err := queueWrite(ctx, "route", "upsert", route); err != nil {
 			log.Warnf("Failed to queue route write for %s: %s", route.Id, err)
