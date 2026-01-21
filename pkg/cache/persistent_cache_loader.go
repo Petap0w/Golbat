@@ -329,10 +329,11 @@ func loadPokestopsFromDB(ctx context.Context, dbConn *sqlx.DB, setter Persistent
 	}
 
 	// Only load recent pokestops (configurable max age)
+	// Include cell_id filter for FortTracker compatibility
 	cfg := config.Config.Redis.PersistentCacheConfig
 	maxAgeDays := cfg.GetMaxAgeDays("pokestop")
 	cutoffTime := time.Now().Unix() - int64(maxAgeDays*86400) // Convert days to seconds
-	whereClause := fmt.Sprintf("updated > %d", cutoffTime)
+	whereClause := fmt.Sprintf("updated > %d AND cell_id IS NOT NULL AND cell_id > 0", cutoffTime)
 
 	return streamTableToCacheDirect(ctx, dbConn, "pokestop", whereClause,
 		func(rows *sqlx.Rows) error {
@@ -372,17 +373,17 @@ func loadGymsFromDB(ctx context.Context, dbConn *sqlx.DB, setter PersistentCache
 		AvailbleSlots          null.Int    `db:"availble_slots"` // VIRTUAL (typo in schema but exists)
 		TeamId                 null.Int    `db:"team_id"`
 		RaidLevel              null.Int    `db:"raid_level"`
-		Enabled                null.Bool   `db:"enabled"`          // TINYINT unsigned → StructScan converts to bool
-		ExRaidEligible         null.Bool   `db:"ex_raid_eligible"` // TINYINT unsigned → StructScan converts to bool
-		InBattle               null.Bool   `db:"in_battle"`        // TINYINT unsigned → StructScan converts to bool
+		Enabled                null.Int    `db:"enabled"`          // MUST match decoder.Gym (null.Int, not null.Bool)
+		ExRaidEligible         null.Int    `db:"ex_raid_eligible"` // MUST match decoder.Gym (null.Int, not null.Bool)
+		InBattle               null.Int    `db:"in_battle"`        // MUST match decoder.Gym (null.Int, not null.Bool)
 		RaidPokemonMove1       null.Int    `db:"raid_pokemon_move_1"`
 		RaidPokemonMove2       null.Int    `db:"raid_pokemon_move_2"`
 		RaidPokemonForm        null.Int    `db:"raid_pokemon_form"`
 		RaidPokemonAlignment   null.Int    `db:"raid_pokemon_alignment"` // Added in migration 18
 		RaidPokemonCp          null.Int    `db:"raid_pokemon_cp"`
-		RaidIsExclusive        null.Bool   `db:"raid_is_exclusive"` // TINYINT unsigned → StructScan converts to bool
+		RaidIsExclusive        null.Int    `db:"raid_is_exclusive"` // MUST match decoder.Gym (null.Int, not null.Bool)
 		CellId                 null.Int    `db:"cell_id"`
-		Deleted                bool        `db:"deleted"` // TINYINT unsigned → StructScan converts to bool
+		Deleted                bool        `db:"deleted"` // decoder.Gym uses bool for deleted
 		TotalCp                null.Int    `db:"total_cp"`
 		FirstSeenTimestamp     int64       `db:"first_seen_timestamp"`
 		RaidPokemonGender      null.Int    `db:"raid_pokemon_gender"`
@@ -400,10 +401,11 @@ func loadGymsFromDB(ctx context.Context, dbConn *sqlx.DB, setter PersistentCache
 	}
 
 	// Only load recent gyms (configurable max age)
+	// Include cell_id filter for FortTracker compatibility
 	cfg := config.Config.Redis.PersistentCacheConfig
 	maxAgeDays := cfg.GetMaxAgeDays("gym")
 	cutoffTime := time.Now().Unix() - int64(maxAgeDays*86400)
-	whereClause := fmt.Sprintf("updated > %d", cutoffTime)
+	whereClause := fmt.Sprintf("updated > %d AND cell_id IS NOT NULL AND cell_id > 0", cutoffTime)
 
 	return streamTableToCacheDirect(ctx, dbConn, "gym", whereClause,
 		func(rows *sqlx.Rows) error {

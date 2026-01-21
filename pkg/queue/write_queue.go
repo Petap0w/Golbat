@@ -49,7 +49,7 @@ type queuedWrite struct {
 }
 
 func NewWriteQueue(client *redis.Client) *WriteQueue {
-	bufferSize := 100000 // 100K in-memory buffer
+	bufferSize := 500000 // 500K in-memory buffer (5 seconds at 100K/sec)
 
 	q := &WriteQueue{
 		client:     client,
@@ -58,7 +58,7 @@ func NewWriteQueue(client *redis.Client) *WriteQueue {
 	}
 
 	// Start background workers to drain buffer
-	workerCount := 10 // 10 parallel workers
+	workerCount := 20 // 20 parallel workers (increased for higher throughput)
 	for i := 0; i < workerCount; i++ {
 		go q.bufferWorker(i)
 	}
@@ -159,18 +159,19 @@ func (q *WriteQueue) GetQueueSizes(ctx context.Context) (map[string]int64, error
 func (q *WriteQueue) bufferWorker(id int) {
 	log.Debugf("Buffer worker %d started", id)
 
-	for write := range q.buffer {
-		// Create a fresh context for each XADD (not tied to GRPC request)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Use a persistent background context for all Redis operations in this worker
+	// This avoids creating/destroying contexts repeatedly and prevents nil context issues
+	ctx := context.Background()
 
+	for write := range q.buffer {
+		// Use Redis client's configured timeouts (20s WriteTimeout)
+		// No need to create a new context with timeout for each operation
 		err := q.client.XAdd(ctx, &redis.XAddArgs{
 			Stream: write.stream,
 			Values: map[string]interface{}{
 				"data": write.opBytes,
 			},
 		}).Err()
-
-		cancel()
 
 		if err != nil {
 			// Retry up to 3 times with exponential backoff
