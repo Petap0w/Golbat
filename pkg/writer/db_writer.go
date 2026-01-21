@@ -183,9 +183,10 @@ func (w *DBWriter) processBatch(ctx context.Context, stream string, messages []r
 
 		log.Debugf("Processed %d operations from %s", len(processedIDs), stream)
 
-		// Periodically trim stream (every 10 batches to reduce overhead)
+		// Periodically trim stream (every 100 batches to avoid blocking Redis)
+		// With 75 workers, this means ~0.75 trims/sec instead of 7.5 trims/sec
 		w.batchesProcessed++
-		if w.batchesProcessed >= 10 {
+		if w.batchesProcessed >= 100 {
 			w.batchesProcessed = 0
 			w.trimStream(ctx, stream)
 		}

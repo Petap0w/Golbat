@@ -112,7 +112,7 @@ func (q *WriteQueue) GetQueueSizes(ctx context.Context) (map[string]int64, error
 			log.Warnf("Failed to get group info for %s: %s", stream, err)
 			continue
 		}
-		
+
 		// Find golbat-writers group and get lag
 		for _, group := range groups {
 			if group.Name == "golbat-writers" {
@@ -149,7 +149,7 @@ func (q *WriteQueue) Flush(ctx context.Context) error {
 			}
 			log.Info("All queues flushed successfully")
 			return nil
-			
+
 		case <-ticker.C:
 			sizes, err := q.GetQueueSizes(flushCtx)
 			if err != nil {
@@ -176,4 +176,3 @@ func (q *WriteQueue) Close() error {
 	// Queue doesn't need explicit close, Redis client handles it
 	return nil
 }
-
