@@ -76,14 +76,15 @@ func (w *DBWriter) Run(ctx context.Context) error {
 
 func (w *DBWriter) processStream(ctx context.Context, stream string) error {
 	// Auto-claim abandoned PENDING messages (from crashed workers)
-	// Reclaim messages PENDING for >10 seconds
+	// Reclaim messages PENDING for >60 seconds (reduced frequency to avoid blocking Redis)
+	// Use smaller count (100) to keep XAUTOCLAIM fast (<1s instead of 10-15s)
 	claimedMsgs, _, err := w.redis.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 		Stream:   stream,
 		Group:    w.consumerGroup,
 		Consumer: w.consumerName,
-		MinIdle:  10 * time.Second,
+		MinIdle:  60 * time.Second, // Wait 60s instead of 10s
 		Start:    "0-0",
-		Count:    int64(w.batchSize), // Use configured batch size
+		Count:    100, // Reduced from batchSize to avoid long-running XAUTOCLAIM
 	}).Result()
 
 	if err != nil && err != redis.Nil {
