@@ -2,7 +2,8 @@ package decoder
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -40,52 +41,33 @@ type Spawnpoint struct {
 //)
 
 func getSpawnpointRecord(ctx context.Context, db db.DbDetails, spawnpointId int64) (*Spawnpoint, error) {
-	// L1 cache check
+	// L1 cache check (always fast, never blocks)
 	inMemorySpawnpoint := spawnpointCache.Get(spawnpointId)
 	if inMemorySpawnpoint != nil {
 		spawnpoint := inMemorySpawnpoint.Value()
 		return &spawnpoint, nil
 	}
 
-	// L2 cache check (Redis) - using optimized batch loader
-	if redisEnabled && spawnpointBatch != nil {
-		records, err := spawnpointBatch.BatchLoad(ctx, []int64{spawnpointId})
-		if err == nil {
-			if record, found := records[spawnpointId]; found {
-				spawnpoint := &Spawnpoint{
-					Id:         record.Id,
-					Lat:        record.Lat,
-					Lon:        record.Lon,
-					DespawnSec: null.IntFromPtr(record.DespawnSec),
-					Updated:    record.Updated,
-					LastSeen:   record.LastSeen,
-				}
-				return spawnpoint, nil
-			}
+	// If Redis DISABLED, fall back to DB lookup (original behavior for small deployments)
+	if !redisEnabled {
+		spawnpoint := Spawnpoint{}
+		err := db.GeneralDb.GetContext(ctx, &spawnpoint,
+			"SELECT id, lat, lon, updated, last_seen, despawn_sec FROM spawnpoint WHERE id = ?",
+			spawnpointId)
+
+		if err != nil {
+			return nil, nil // Not found or error
 		}
+
+		// Populate L1 cache
+		spawnpointCache.Set(spawnpointId, spawnpoint, ttlcache.DefaultTTL)
+		return &spawnpoint, nil
 	}
 
-	// DB fallback
-	spawnpoint := Spawnpoint{}
-	err := db.GeneralDb.GetContext(ctx, &spawnpoint, "SELECT id, lat, lon, updated, last_seen, despawn_sec FROM spawnpoint WHERE id = ?", spawnpointId)
-
-	statsCollector.IncDbQuery("select spawnpoint", err)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-
-	if err != nil {
-		return &Spawnpoint{Id: spawnpointId}, err
-	}
-
-	// Populate caches
-	spawnpointCache.Set(spawnpointId, spawnpoint, ttlcache.DefaultTTL)
-	if redisEnabled && l2Cache != nil {
-		l2Cache.SetSpawnpoint(ctx, spawnpoint.Id, spawnpoint.Lat, spawnpoint.Lon,
-			spawnpoint.DespawnSec.ValueOrZero(), spawnpoint.Updated, spawnpoint.LastSeen)
-	}
-
-	return &spawnpoint, nil
+	// Redis ENABLED: L1 only (no blocking lookups)
+	// All hot spawnpoints loaded on startup from persistent_cache:spawnpoint
+	// Not in L1 = new spawnpoint, will be created on first sighting
+	return nil, nil
 }
 
 func Abs(x int64) int64 {
@@ -172,13 +154,14 @@ func spawnpointUpdate(ctx context.Context, db db.DbDetails, spawnpoint *Spawnpoi
 	// Update L1 cache immediately
 	spawnpointCache.Set(spawnpoint.Id, *spawnpoint, ttlcache.DefaultTTL)
 
-	// Update L2 cache immediately (optimized format)
-	if redisEnabled && l2Cache != nil {
-		l2Cache.SetSpawnpoint(ctx, spawnpoint.Id, spawnpoint.Lat, spawnpoint.Lon,
-			spawnpoint.DespawnSec.ValueOrZero(), spawnpoint.Updated, spawnpoint.LastSeen)
+	// Update Redis persistent cache (async, non-blocking) for fast restart
+	if config.Config.Redis.PersistentCacheEnabled && redisEnabled {
+		if jsonData, err := json.Marshal(spawnpoint); err == nil {
+			updatePersistentCacheAsync("spawnpoint", fmt.Sprintf("%d", spawnpoint.Id), jsonData)
+		}
 	}
 
-	// Queue write to database
+	// Queue write to database (will update persistent_cache:spawnpoint via writer)
 	if redisEnabled {
 		if err := queueWrite(ctx, "spawnpoint", "upsert", spawnpoint); err != nil {
 			log.Warnf("Failed to queue spawnpoint write for %d: %s", spawnpoint.Id, err)
@@ -225,14 +208,10 @@ func spawnpointSeen(ctx context.Context, db db.DbDetails, spawnpointId int64) {
 
 		// Queue write to database if Redis enabled
 		if redisEnabled {
-			// Update cache immediately
+			// Update L1 cache immediately
 			spawnpointCache.Set(spawnpoint.Id, spawnpoint, ttlcache.DefaultTTL)
-			if l2Cache != nil {
-				l2Cache.SetSpawnpoint(ctx, spawnpoint.Id, spawnpoint.Lat, spawnpoint.Lon,
-					spawnpoint.DespawnSec.ValueOrZero(), spawnpoint.Updated, spawnpoint.LastSeen)
-			}
 
-			// Queue the write
+			// Queue the write (will update persistent_cache:spawnpoint via writer)
 			if err := queueWrite(ctx, "spawnpoint", "upsert", &spawnpoint); err != nil {
 				log.Warnf("Failed to queue spawnpoint last_seen update: %s", err)
 				// Fall back to direct write

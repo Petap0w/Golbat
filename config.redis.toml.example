@@ -27,11 +27,6 @@ pool_size = 100
 # - Survives most scanner pauses and short maintenance
 cache_ttl_minutes = 120
 
-# Maximum queue size (DEPRECATED - no longer used)
-# Kept for backwards compatibility, but XADD no longer uses MAXLEN
-# Stream trimming is now handled by workers (see stream_trim_target)
-max_queue_size = 1000000
-
 # Stream trim target - workers periodically trim streams to this size
 # This keeps streams lean and Redis fast
 # Recommended: 2-3x your (writer_workers × writer_batch_size)
@@ -50,44 +45,45 @@ writer_batch_size = 500
 # Recommended: 4-8 for most workloads, 8-16 for very high load
 writer_workers = 4
 
-# Load hot data into Redis on startup
-# This pre-populates Redis with:
-# - Active spawnpoints (last 7 days)
-load_hot_on_startup = true
-
-# Static Object Persistence: 24h Redis cache for all permanent game objects
-# Includes: Pokestops, Gyms, Stations (Power Spots), Routes
+# =========================================================================
+# PERSISTENT CACHE: Single option for all startup loading + Redis caching
+# =========================================================================
+# Handles ALL static objects: Pokestops, Gyms, Stations, Routes, Spawnpoints (hot, last 7 days)
+# 
+# What it does:
+# - On startup: Loads all data from Redis (1-2 min) OR from DB if Redis empty (20-30 min)
+# - During runtime: Continuously updates Redis with TTL
+# - On restart: Fast reload from Redis, preserving quest/raid/battle data
 # 
 # Benefits:
-# - Fast restart: 10-20s (vs 30-60s from DB)
-# - Data preservation: Quest, raid, battle, and route data intact across restarts
-# - DB fallback: Automatic fallback to DB if Redis unavailable (20-30s)
+# - Fast restart: 1-2 min from Redis (vs 20-30 min from DB)
+# - Data preservation: Quest, raid, battle, route data intact across restarts
+# - DB fallback: Automatic fallback to DB if Redis unavailable
 # - Targeted updates: After restart, old state available for comparison
 # 
-# Memory usage:
+# Memory usage in Redis:
 # - Pokestops: ~750 MB (1.5M objects)
 # - Gyms: ~500 MB (1.0M objects)
 # - Stations: ~40 MB (100K objects)
 # - Routes: ~25 MB (50K objects)
-# - Total: ~1.3 GB (acceptable for 100GB Redis)
-fort_cache_enabled = true
+# - Spawnpoints: ~900 MB (4.5M hot spawnpoints, last 7 days)
+# - Total: ~2.2 GB (acceptable for 100GB Redis)
+#
+# THIS IS THE SINGLE OPTION for all startup loading and persistent caching
+persistent_cache_enabled = true
 
-# How long to keep static objects in Redis cache (in hours)
+# How long to keep data in Redis cache (in hours)
 # Recommended: 24 hours (survives daily restarts, preserves all data)
-fort_cache_ttl_hours = 24
-# Total: ~30GB with your scale
-# Takes 3-5 minutes on startup
-# Recommended: true for production
-load_hot_on_startup = true
+persistent_cache_ttl_hours = 24
 
 # ---------------------------------------------------------
 # Maintenance Window Handling
 # ---------------------------------------------------------
 # If you pause scanners for maintenance (e.g., 2 hours):
 # 1. Keep Golbat running → L1 cache preserved
-# 2. Set cache_ttl_minutes = 180+ → Redis survives pause
-# 3. On Golbat restart → load_hot_on_startup reloads cache
-# Result: 3-5 min reload instead of hours ✅
+# 2. Set persistent_cache_ttl_hours = 24+ → Redis survives pause
+# 3. On Golbat restart → persistent cache reloads from Redis (1-2 min)
+# Result: Fast reload from Redis instead of DB ✅
 
 # Example full configuration:
 # Copy the relevant sections to your config.toml

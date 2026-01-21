@@ -42,14 +42,27 @@ type Route struct {
 }
 
 func getRouteRecord(db db.DbDetails, id string) (*Route, error) {
-	// L1 CACHE ONLY - no blocking I/O!
+	// L1 cache check (always fast, never blocks)
 	inMemoryRoute := routeCache.Get(id)
 	if inMemoryRoute != nil {
 		route := inMemoryRoute.Value()
 		return &route, nil
 	}
 
-	// Not in L1 cache = return nil
+	// If Redis DISABLED, fall back to DB lookup (original behavior)
+	if !IsRedisEnabled() {
+		route := Route{}
+		err := db.GeneralDb.Get(&route, "SELECT * FROM route WHERE id = ?", id)
+		if err != nil {
+			return nil, nil // Not found or error
+		}
+		
+		// Populate L1 cache
+		routeCache.Set(id, route, ttlcache.DefaultTTL)
+		return &route, nil
+	}
+
+	// Redis ENABLED: L1 only (no blocking lookups)
 	return nil, nil
 }
 
@@ -93,7 +106,7 @@ func saveRouteRecord(db db.DbDetails, route *Route) error {
 	ctx := context.TODO()
 	if redisEnabled {
 		if jsonData, err := json.Marshal(route); err == nil {
-			updateFortCacheAsync("route", route.Id, jsonData)
+			updatePersistentCacheAsync("route", route.Id, jsonData)
 		}
 	}
 

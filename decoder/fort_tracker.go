@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	log "github.com/sirupsen/logrus"
 
 	"golbat/db"
@@ -58,31 +59,19 @@ func InitFortTracker(staleThresholdSeconds int64) {
 	log.Infof("FortTracker: initialized with stale threshold of %d seconds", staleThresholdSeconds)
 }
 
-// LoadFortsFromRedis populates the tracker from Redis on startup
-func LoadFortsFromRedis(ctx context.Context) error {
+// LoadFortsFromL1Cache populates the tracker from L1 cache (fast path when Redis enabled)
+func LoadFortsFromL1Cache() error {
 	if fortTracker == nil {
-		return nil
-	}
-
-	if !IsRedisEnabled() || l2Cache == nil {
-		log.Warn("FortTracker: Redis not available, skipping fort tracker load")
 		return nil
 	}
 
 	startTime := time.Now()
 
-	// Load from Redis cache which was just populated
-	pokestopCount, err := loadPokestopsFromRedis(ctx)
-	if err != nil {
-		return err
-	}
+	// Load from L1 cache (instant - just iterating in-memory data)
+	pokestopCount := loadPokestopsFromL1Cache()
+	gymCount := loadGymsFromL1Cache()
 
-	gymCount, err := loadGymsFromRedis(ctx)
-	if err != nil {
-		return err
-	}
-
-	log.Infof("FortTracker: loaded %d pokestops and %d gyms from Redis in %v",
+	log.Infof("FortTracker: loaded %d pokestops and %d gyms from L1 cache in %v",
 		pokestopCount, gymCount, time.Since(startTime))
 
 	return nil
@@ -116,80 +105,82 @@ func LoadFortsFromDB(ctx context.Context, dbDetails db.DbDetails) error {
 
 const loadBatchSize = 30000
 
-// loadPokestopsFromRedis loads pokestops from Redis cache
-func loadPokestopsFromRedis(ctx context.Context) (int, error) {
-	// Get all pokestop keys from Redis
-	keys, err := l2Cache.GetAllKeys(ctx, "pokestop:*")
-	if err != nil {
-		log.Errorf("FortTracker: failed to get pokestop keys from Redis - %s", err)
-		return 0, err
-	}
-
-	var totalCount int
+// loadPokestopsFromL1Cache loads pokestops from L1 cache into FortTracker
+// Much faster than DB - used when Redis enabled and persistent cache loaded
+func loadPokestopsFromL1Cache() int {
+	count := 0
 	fortTracker.mu.Lock()
 	defer fortTracker.mu.Unlock()
 
-	for _, key := range keys {
-		// Get pokestop from Redis
-		var pokestop Pokestop
-		if err := l2Cache.Get(ctx, key, &pokestop); err != nil {
-			continue // Skip on error
+	// Iterate all sharded pokestop caches
+	for i := 0; i < len(pokestopCache); i++ {
+		cache := pokestopCache[i]
+		if cache == nil {
+			continue
 		}
 
-		if !pokestop.CellId.Valid || pokestop.CellId.Int64 == 0 {
-			continue // Skip if no cell_id
-		}
+		// Iterate all items in this shard
+		cache.Range(func(item *ttlcache.Item[string, Pokestop]) bool {
+			pokestop := item.Value()
 
-		cellId := uint64(pokestop.CellId.Int64)
-		cell := fortTracker.getOrCreateCellLocked(cellId)
-		cell.pokestops[pokestop.Id] = struct{}{}
-		fortTracker.forts[pokestop.Id] = &FortInfo{
-			cellId:   cellId,
-			lastSeen: pokestop.Updated * 1000, // convert to milliseconds
-			isGym:    false,
-		}
-		totalCount++
+			// Skip if no cell_id
+			if !pokestop.CellId.Valid || pokestop.CellId.Int64 == 0 {
+				return true // continue iteration
+			}
+
+			cellId := uint64(pokestop.CellId.Int64)
+			cell := fortTracker.getOrCreateCellLocked(cellId)
+			cell.pokestops[pokestop.Id] = struct{}{}
+			fortTracker.forts[pokestop.Id] = &FortInfo{
+				cellId:   cellId,
+				lastSeen: pokestop.Updated * 1000, // convert to milliseconds
+				isGym:    false,
+			}
+			count++
+			return true // continue iteration
+		})
 	}
 
-	return totalCount, nil
+	return count
 }
 
-// loadGymsFromRedis loads gyms from Redis cache
-func loadGymsFromRedis(ctx context.Context) (int, error) {
-	// Get all gym keys from Redis
-	keys, err := l2Cache.GetAllKeys(ctx, "gym:*")
-	if err != nil {
-		log.Errorf("FortTracker: failed to get gym keys from Redis - %s", err)
-		return 0, err
-	}
-
-	var totalCount int
+// loadGymsFromL1Cache loads gyms from L1 cache into FortTracker
+// Much faster than DB - used when Redis enabled and persistent cache loaded
+func loadGymsFromL1Cache() int {
+	count := 0
 	fortTracker.mu.Lock()
 	defer fortTracker.mu.Unlock()
 
-	for _, key := range keys {
-		// Get gym from Redis
-		var gym Gym
-		if err := l2Cache.Get(ctx, key, &gym); err != nil {
-			continue // Skip on error
+	// Iterate all sharded gym caches
+	for i := 0; i < len(gymCache); i++ {
+		cache := gymCache[i]
+		if cache == nil {
+			continue
 		}
 
-		if !gym.CellId.Valid || gym.CellId.Int64 == 0 {
-			continue // Skip if no cell_id
-		}
+		// Iterate all items in this shard
+		cache.Range(func(item *ttlcache.Item[string, Gym]) bool {
+			gym := item.Value()
 
-		cellId := uint64(gym.CellId.Int64)
-		cell := fortTracker.getOrCreateCellLocked(cellId)
-		cell.gyms[gym.Id] = struct{}{}
-		fortTracker.forts[gym.Id] = &FortInfo{
-			cellId:   cellId,
-			lastSeen: gym.Updated * 1000, // convert to milliseconds
-			isGym:    true,
-		}
-		totalCount++
+			// Skip if no cell_id
+			if !gym.CellId.Valid || gym.CellId.Int64 == 0 {
+				return true // continue iteration
+			}
+
+			cellId := uint64(gym.CellId.Int64)
+			cell := fortTracker.getOrCreateCellLocked(cellId)
+			cell.gyms[gym.Id] = struct{}{}
+			fortTracker.forts[gym.Id] = &FortInfo{
+				cellId:   cellId,
+				lastSeen: gym.Updated * 1000, // convert to milliseconds
+				isGym:    true,
+			}
+			count++
+			return true // continue iteration
+		})
 	}
 
-	return totalCount, nil
+	return count
 }
 
 func loadPokestopsFromDB(ctx context.Context, dbDetails db.DbDetails) (int, error) {
@@ -523,11 +514,34 @@ func clearGymWithLock(ctx context.Context, dbDetails db.DbDetails, gymId string,
 	gymMutex.Lock()
 	defer gymMutex.Unlock()
 
+	// Delete from L1 cache
 	deleteGymFromCache(gymId)
-	if err := db.ClearOldGyms(ctx, dbDetails, []string{gymId}); err != nil {
-		log.Errorf("FortTracker: failed to clear gym %s - %s", gymId, err)
-		return
+
+	// Delete from Redis persistent cache (async, non-blocking)
+	deletePersistentCacheAsync("gym", gymId)
+
+	// Get the gym record and mark as deleted
+	gym := Gym{Id: gymId, Deleted: true, Updated: time.Now().Unix()}
+
+	// Choose write path based on Redis availability
+	if IsRedisEnabled() {
+		// Queue the deletion (will update DB via writer)
+		if err := queueWrite(ctx, "gym", "upsert", gym); err != nil {
+			log.Warnf("FortTracker: failed to queue gym deletion %s, falling back to direct DB: %s", gymId, err)
+			// Fallback to direct DB write
+			if err := db.ClearOldGyms(ctx, dbDetails, []string{gymId}); err != nil {
+				log.Errorf("FortTracker: failed to clear gym %s - %s", gymId, err)
+				return
+			}
+		}
+	} else {
+		// Direct DB write when Redis disabled
+		if err := db.ClearOldGyms(ctx, dbDetails, []string{gymId}); err != nil {
+			log.Errorf("FortTracker: failed to clear gym %s - %s", gymId, err)
+			return
+		}
 	}
+
 	if removeFromTracker {
 		fortTracker.RemoveFort(gymId)
 		log.Infof("FortTracker: removed gym in cell %d: %s", cellId, gymId)
@@ -545,11 +559,34 @@ func clearPokestopWithLock(ctx context.Context, dbDetails db.DbDetails, stopId s
 	pokestopMutex.Lock()
 	defer pokestopMutex.Unlock()
 
+	// Delete from L1 cache
 	deletePokestopFromCache(stopId)
-	if err := db.ClearOldPokestops(ctx, dbDetails, []string{stopId}); err != nil {
-		log.Errorf("FortTracker: failed to clear pokestop %s - %s", stopId, err)
-		return
+
+	// Delete from Redis persistent cache (async, non-blocking)
+	deletePersistentCacheAsync("pokestop", stopId)
+
+	// Get the pokestop record and mark as deleted
+	pokestop := Pokestop{Id: stopId, Deleted: true, Updated: time.Now().Unix()}
+
+	// Choose write path based on Redis availability
+	if IsRedisEnabled() {
+		// Queue the deletion (will update DB via writer)
+		if err := queueWrite(ctx, "pokestop", "upsert", pokestop); err != nil {
+			log.Warnf("FortTracker: failed to queue pokestop deletion %s, falling back to direct DB: %s", stopId, err)
+			// Fallback to direct DB write
+			if err := db.ClearOldPokestops(ctx, dbDetails, []string{stopId}); err != nil {
+				log.Errorf("FortTracker: failed to clear pokestop %s - %s", stopId, err)
+				return
+			}
+		}
+	} else {
+		// Direct DB write when Redis disabled
+		if err := db.ClearOldPokestops(ctx, dbDetails, []string{stopId}); err != nil {
+			log.Errorf("FortTracker: failed to clear pokestop %s - %s", stopId, err)
+			return
+		}
 	}
+
 	if removeFromTracker {
 		fortTracker.RemoveFort(stopId)
 		log.Infof("FortTracker: removed pokestop in cell %d: %s", cellId, stopId)

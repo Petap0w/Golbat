@@ -49,14 +49,27 @@ type webhookLineup struct {
 //->   `updated` int unsigned NOT NULL,
 
 func getIncidentRecord(ctx context.Context, db db.DbDetails, incidentId string) (*Incident, error) {
-	// L1 CACHE ONLY - no blocking I/O!
+	// L1 cache check (always fast, never blocks)
 	inMemoryIncident := incidentCache.Get(incidentId)
 	if inMemoryIncident != nil {
 		incident := inMemoryIncident.Value()
 		return &incident, nil
 	}
 
-	// Not in L1 cache = return nil
+	// If Redis DISABLED, fall back to DB lookup (original behavior)
+	if !IsRedisEnabled() {
+		incident := Incident{}
+		err := db.GeneralDb.GetContext(ctx, &incident, "SELECT * FROM incident WHERE id = ?", incidentId)
+		if err != nil {
+			return nil, nil // Not found or error
+		}
+		
+		// Populate L1 cache
+		incidentCache.Set(incidentId, incident, ttlcache.DefaultTTL)
+		return &incident, nil
+	}
+
+	// Redis ENABLED: L1 only (no blocking lookups)
 	return nil, nil
 }
 

@@ -647,10 +647,10 @@ func SetStatsCollector(collector stats_collector.StatsCollector) {
 }
 
 // FortCacheSetter implements cache.FortSetter for loading forts into L1 cache
-type FortCacheSetter struct{}
+type PersistentCacheSetter struct{}
 
 // SetPokestop populates L1 cache with pokestop data from JSON
-func (f *FortCacheSetter) SetPokestop(id string, data []byte) error {
+func (f *PersistentCacheSetter) SetPokestop(id string, data []byte) error {
 	var stop Pokestop
 	if err := json.Unmarshal(data, &stop); err != nil {
 		return err
@@ -660,7 +660,7 @@ func (f *FortCacheSetter) SetPokestop(id string, data []byte) error {
 }
 
 // SetGym populates L1 cache with gym data from JSON
-func (f *FortCacheSetter) SetGym(id string, data []byte) error {
+func (f *PersistentCacheSetter) SetGym(id string, data []byte) error {
 	var gym Gym
 	if err := json.Unmarshal(data, &gym); err != nil {
 		return err
@@ -670,7 +670,7 @@ func (f *FortCacheSetter) SetGym(id string, data []byte) error {
 }
 
 // SetStation populates L1 cache with station data from JSON
-func (f *FortCacheSetter) SetStation(id string, data []byte) error {
+func (f *PersistentCacheSetter) SetStation(id string, data []byte) error {
 	var station Station
 	if err := json.Unmarshal(data, &station); err != nil {
 		return err
@@ -680,7 +680,7 @@ func (f *FortCacheSetter) SetStation(id string, data []byte) error {
 }
 
 // SetRoute populates L1 cache with route data from JSON
-func (f *FortCacheSetter) SetRoute(id string, data []byte) error {
+func (f *PersistentCacheSetter) SetRoute(id string, data []byte) error {
 	var route Route
 	if err := json.Unmarshal(data, &route); err != nil {
 		return err
@@ -689,39 +689,73 @@ func (f *FortCacheSetter) SetRoute(id string, data []byte) error {
 	return nil
 }
 
-// GetFortCacheSetter returns a FortSetter for loading forts
-func GetFortCacheSetter() *FortCacheSetter {
-	return &FortCacheSetter{}
+// SetSpawnpoint populates L1 cache with spawnpoint data from JSON
+func (f *PersistentCacheSetter) SetSpawnpoint(id string, data []byte) error {
+	var spawnpoint Spawnpoint
+	if err := json.Unmarshal(data, &spawnpoint); err != nil {
+		return err
+	}
+	// spawnpointCache uses int64 as key (converted from string)
+	spawnpointCache.Set(spawnpoint.Id, spawnpoint, ttlcache.DefaultTTL)
+	return nil
+}
+
+// GetPersistentCacheSetter returns a PersistentCacheSetter for loading persistent cache
+func GetPersistentCacheSetter() *PersistentCacheSetter {
+	return &PersistentCacheSetter{}
 }
 
 // updateFortCacheAsync updates Redis fort cache asynchronously
 // Uses global redisClient from redis_bridge.go
-func updateFortCacheAsync(fortType string, id string, data []byte) {
+func updatePersistentCacheAsync(dataType string, id string, data []byte) {
 	if redisClient == nil || !redisEnabled {
 		return
 	}
-	
+
 	cfg := config.Config.Redis
-	if !cfg.FortCacheEnabled {
+	if !cfg.PersistentCacheEnabled {
 		return
 	}
-	
+
 	// Run async for non-blocking behavior (hundreds of thousands per second)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		
-		hashKey := "fort_cache:" + fortType
-		ttl := time.Duration(cfg.FortCacheTTLHours) * time.Hour
-		
+
+		hashKey := "persistent_cache:" + dataType
+		ttl := time.Duration(cfg.PersistentCacheTTLHours) * time.Hour
+
 		// Use pipeline for efficiency (single round trip)
 		pipe := redisClient.Pipeline()
 		pipe.HSet(ctx, hashKey, id, data)
 		pipe.Expire(ctx, hashKey, ttl)
-		
+
 		if _, err := pipe.Exec(ctx); err != nil {
 			// Don't spam logs, this is non-critical
-			log.Debugf("Failed to update %s cache for %s: %v", fortType, id, err)
+			log.Debugf("Failed to update %s persistent cache for %s: %v", dataType, id, err)
+		}
+	}()
+}
+
+// deletePersistentCacheAsync removes an entry from Redis persistent cache (for deleted forts)
+func deletePersistentCacheAsync(dataType string, id string) {
+	if redisClient == nil || !redisEnabled {
+		return
+	}
+
+	cfg := config.Config.Redis
+	if !cfg.PersistentCacheEnabled {
+		return
+	}
+
+	// Run async for non-blocking behavior
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		hashKey := "persistent_cache:" + dataType
+		if err := redisClient.HDel(ctx, hashKey, id).Err(); err != nil {
+			log.Debugf("Failed to delete %s from persistent cache for %s: %v", dataType, id, err)
 		}
 	}()
 }

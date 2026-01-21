@@ -33,6 +33,38 @@ password = ""
 address = "127.0.0.1:3306"
 db = ""
 
+[redis]
+enabled = false                      # Enable Redis for async DB writes and persistent cache
+addresses = ["127.0.0.1:6379"]       # Redis server addresses (can specify multiple for cluster)
+password = ""                        # Redis password (leave empty if no auth)
+db = 0                               # Redis database number (0-15, use different DBs to separate prod/dev)
+pool_size = 2000                     # Redis connection pool size (tune based on load)
+writer_batch_size = 3000             # How many records each writer processes per batch
+writer_workers = 75                  # Number of writer workers (tune based on CPU/load)
+
+# Stream management - workers periodically trim streams to this target size
+# Prevents unbounded growth while keeping trimming fast (<20ms)
+stream_trim_target = 100000          # Target stream length (per stream: critical, high, normal)
+
+# Persistent cache: Handles ALL static objects (pokestops, gyms, stations, routes, hot spawnpoints)
+# - On startup: Loads from Redis (1-2 min) OR from DB if Redis empty (20-30 min)  
+# - During runtime: Continuously updates Redis with 24h TTL
+# - Preserves quest data and prevents full DB write storms on restart
+persistent_cache_enabled = true      # SINGLE option to enable persistent cache + startup loading
+persistent_cache_ttl_hours = 24      # How long to keep data in Redis (default: 24 hours)
+
+# Persistent cache optimization: Only load RECENT data (reduces startup time & memory)
+[redis.persistent_cache]
+pokestop_max_age_days = 30           # Only load pokestops updated in last 30 days
+gym_max_age_days = 30                # Only load gyms updated in last 30 days
+station_max_age_days = 90            # Only load stations updated in last 90 days
+route_max_age_days = 90              # Only load routes updated in last 90 days
+spawnpoint_max_age_days = 7          # Only load spawnpoints seen in last 7 days (hot spawnpoints)
+
+# Automatic trimming: Remove stale data from Redis to save memory
+trim_enabled = true                  # Enable automatic trimming (recommended)
+trim_interval_hours = 24             # Trim every 24 hours
+
 [pvp]
 enabled = true
 include_hundos_under_cap = false

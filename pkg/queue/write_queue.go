@@ -37,18 +37,12 @@ type WriteOperation struct {
 }
 
 type WriteQueue struct {
-	client       *redis.Client
-	maxQueueSize int64
+	client *redis.Client
 }
 
-func NewWriteQueue(client *redis.Client, maxQueueSize int64) *WriteQueue {
-	if maxQueueSize == 0 {
-		maxQueueSize = 1000000
-	}
-
+func NewWriteQueue(client *redis.Client) *WriteQueue {
 	return &WriteQueue{
-		client:       client,
-		maxQueueSize: maxQueueSize,
+		client: client,
 	}
 }
 

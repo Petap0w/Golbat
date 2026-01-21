@@ -40,7 +40,6 @@ var dbDetails db2.DbDetails
 var statsCollector stats_collector.StatsCollector
 var redisClient *golbatRedis.Client
 var writeQueue *queue.WriteQueue
-var l2Cache *cache.L2Cache
 
 func main() {
 	var wg sync.WaitGroup
@@ -151,12 +150,8 @@ func main() {
 			log.Fatalf("Failed to connect to Redis: %s", err)
 		}
 
-		// Initialize L2 cache
-		l2Cache = cache.NewL2Cache(redisClient.GetClient(), cfg.Redis.CacheTTLMinutes)
-		log.Info("L2 cache initialized")
-
 		// Initialize write queue
-		writeQueue = queue.NewWriteQueue(redisClient.GetClient(), cfg.Redis.MaxQueueSize)
+		writeQueue = queue.NewWriteQueue(redisClient.GetClient())
 		log.Info("Write queue initialized")
 
 		// Pre-warm Redis connection pool to handle startup burst
@@ -175,34 +170,23 @@ func main() {
 		wg.Wait()
 		log.Infof("Redis pool pre-warmed in %v", time.Since(preWarmStart))
 
-		// Initialize spawnpoint batch loader
-		spawnpointLoader := cache.NewSpawnpointLoader(l2Cache, db)
-
 		// Initialize decoder with Redis components
-		decoder.InitRedis(l2Cache, writeQueue, spawnpointLoader)
+		decoder.InitRedis(writeQueue)
 		log.Info("Decoder Redis bridge initialized")
 
-		// Load hot data into Redis if configured
-		if cfg.Redis.LoadHotOnStartup {
-			log.Info("Loading hot data into Redis...")
-
-			// Load hot spawnpoints (last 7 days) into BOTH L1 and Redis
-			if err := spawnpointLoader.LoadHotSpawnpointsOnStartup(ctx, decoder.PopulateSpawnpointL1Cache); err != nil {
-				log.Errorf("Failed to load hot spawnpoints: %s", err)
-			}
-
-			log.Info("Hot data loaded into Redis")
-		}
-
-		// Load forts from Redis cache (fast restart + quest data preservation)
-		if cfg.Redis.FortCacheEnabled {
-			// Set Redis client in decoder for fort cache updates
+		// Load persistent cache from Redis (fast restart + data preservation)
+		// This handles ALL static objects: pokestops, gyms, stations, routes, spawnpoints
+		if cfg.Redis.PersistentCacheEnabled {
+			// Set Redis client in decoder for persistent cache updates
 			decoder.SetRedisClient(redisClient.GetClient())
-			
-			fortSetter := decoder.GetFortCacheSetter()
-			if err := cache.LoadFortsOnStartup(ctx, redisClient.GetClient(), db, fortSetter); err != nil {
-				log.Errorf("Failed to load forts: %s", err)
+
+			persistentCacheSetter := decoder.GetPersistentCacheSetter()
+			if err := cache.LoadPersistentCacheOnStartup(ctx, redisClient.GetClient(), db, persistentCacheSetter); err != nil {
+				log.Errorf("Failed to load persistent cache: %s", err)
 			}
+
+			// Start background trimmer to remove stale data from Redis
+			cache.StartPersistentCacheTrimmer(redisClient.GetClient())
 		}
 	} else {
 		log.Info("Redis disabled, using direct DB mode")
@@ -337,11 +321,19 @@ func main() {
 	}
 	decoder.InitFortTracker(staleThreshold)
 
-	// Load forts into tracker
-	// Note: FortTracker only needs (id, cell_id, updated) - not full records
-	// Loading from DB with specific columns is faster than scanning 1.6M Redis keys
-	if err := decoder.LoadFortsFromDB(ctx, dbDetails); err != nil {
-		log.Errorf("failed to load forts from DB into tracker: %s", err)
+	// Load forts into tracker - smart path based on Redis availability
+	if cfg.Redis.Enabled && cfg.Redis.PersistentCacheEnabled {
+		// Fast path: Load from L1 cache (already populated by persistent cache)
+		// This is instant (just iterating in-memory data) vs 8-10s DB query
+		if err := decoder.LoadFortsFromL1Cache(); err != nil {
+			log.Errorf("failed to load forts from L1 cache into tracker: %s", err)
+		}
+	} else {
+		// Fallback: Load from DB (Redis disabled or persistent cache not enabled)
+		// Uses optimized query: SELECT id, cell_id, updated FROM pokestop/gym
+		if err := decoder.LoadFortsFromDB(ctx, dbDetails); err != nil {
+			log.Errorf("failed to load forts from DB into tracker: %s", err)
+		}
 	}
 
 	if cfg.TestFortInMemory {

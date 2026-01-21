@@ -107,16 +107,29 @@ type Pokestop struct {
 }
 
 func GetPokestopRecord(ctx context.Context, db db.DbDetails, fortId string) (*Pokestop, error) {
-	// L1 CACHE ONLY - no blocking I/O!
-	// Pokestops are NOT stored in Redis (only queued for DB writes)
-	// External services read from DB directly
+	// L1 cache check (always fast, never blocks)
 	stop := getPokestopFromCache(fortId)
 	if stop != nil {
 		pokestop := stop.Value()
 		return &pokestop, nil
 	}
 
-	// Not in L1 cache = return nil (data will populate when scanned)
+	// If Redis DISABLED, fall back to DB lookup (original behavior for small deployments)
+	if !IsRedisEnabled() {
+		pokestop := Pokestop{}
+		err := db.GeneralDb.GetContext(ctx, &pokestop, "SELECT * FROM pokestop WHERE id = ?", fortId)
+		if err != nil {
+			return nil, nil // Not found or error
+		}
+
+		// Populate L1 cache
+		setPokestopCache(fortId, pokestop, ttlcache.DefaultTTL)
+		return &pokestop, nil
+	}
+
+	// Redis ENABLED: L1 only (no blocking lookups)
+	// All pokestops loaded on startup from persistent_cache:pokestop
+	// Not in L1 = new pokestop, will be created on first GMO
 	return nil, nil
 }
 
@@ -758,7 +771,7 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 	// Update Redis fort cache (async, non-blocking) for fast restart + quest preservation
 	if redisEnabled {
 		if jsonData, err := json.Marshal(pokestop); err == nil {
-			updateFortCacheAsync("pokestop", pokestop.Id, jsonData)
+			updatePersistentCacheAsync("pokestop", pokestop.Id, jsonData)
 		}
 	}
 

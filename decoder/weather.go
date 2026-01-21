@@ -52,14 +52,27 @@ type Weather struct {
 //)
 
 func getWeatherRecord(ctx context.Context, db db.DbDetails, weatherId int64) (*Weather, error) {
-	// L1 CACHE ONLY - no blocking I/O!
+	// L1 cache check (always fast, never blocks)
 	inMemoryWeather := weatherCache.Get(weatherId)
 	if inMemoryWeather != nil {
 		weather := inMemoryWeather.Value()
 		return &weather, nil
 	}
 
-	// Not in L1 cache = return nil
+	// If Redis DISABLED, fall back to DB lookup (original behavior)
+	if !IsRedisEnabled() {
+		weather := Weather{}
+		err := db.GeneralDb.GetContext(ctx, &weather, "SELECT * FROM weather WHERE s2_cell_id = ?", weatherId)
+		if err != nil {
+			return nil, nil // Not found or error
+		}
+		
+		// Populate L1 cache
+		weatherCache.Set(weatherId, weather, ttlcache.DefaultTTL)
+		return &weather, nil
+	}
+
+	// Redis ENABLED: L1 only (no blocking lookups)
 	return nil, nil
 }
 

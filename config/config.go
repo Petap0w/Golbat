@@ -121,19 +121,64 @@ type database struct {
 }
 
 type redis struct {
-	Enabled          bool     `koanf:"enabled"`
-	Addresses        []string `koanf:"addresses"`
-	Password         string   `koanf:"password"`
-	DB               int      `koanf:"db"`
-	PoolSize         int      `koanf:"pool_size"`
-	CacheTTLMinutes  int      `koanf:"cache_ttl_minutes"`
-	MaxQueueSize     int64    `koanf:"max_queue_size"` // Deprecated - no longer used for MAXLEN
-	StreamTrimTarget int64    `koanf:"stream_trim_target"` // Target size to trim streams to (e.g., 100000)
-	WriterBatchSize  int      `koanf:"writer_batch_size"`
-	WriterWorkers    int      `koanf:"writer_workers"`
-	LoadHotOnStartup bool     `koanf:"load_hot_on_startup"`
-	FortCacheEnabled bool     `koanf:"fort_cache_enabled"` // Enable 24h Redis cache for forts (fast restart + quest data preservation)
-	FortCacheTTLHours int     `koanf:"fort_cache_ttl_hours"` // How long to keep forts in Redis cache (default: 24)
+	Enabled                 bool                  `koanf:"enabled"`
+	Addresses               []string              `koanf:"addresses"`
+	Password                string                `koanf:"password"`
+	DB                      int                   `koanf:"db"`
+	PoolSize                int                   `koanf:"pool_size"`
+	StreamTrimTarget        int64                 `koanf:"stream_trim_target"` // Target size to trim streams to (e.g., 100000)
+	WriterBatchSize         int                   `koanf:"writer_batch_size"`
+	WriterWorkers           int                   `koanf:"writer_workers"`
+	PersistentCacheEnabled  bool                  `koanf:"persistent_cache_enabled"`   // Enable 24h Redis persistent cache + startup loading for all static objects
+	PersistentCacheTTLHours int                   `koanf:"persistent_cache_ttl_hours"` // How long to keep data in Redis persistent cache (default: 24)
+	PersistentCacheConfig   persistentCacheConfig `koanf:"persistent_cache"`           // Persistent cache age filters and trimming
+}
+
+// persistentCacheConfig defines age filters and trimming for persistent cache
+type persistentCacheConfig struct {
+	// Max age (in days) for loading objects on startup - only load recent data
+	PokestopMaxAgeDays   int `koanf:"pokestop_max_age_days"`   // Default: 30 days
+	GymMaxAgeDays        int `koanf:"gym_max_age_days"`        // Default: 30 days
+	StationMaxAgeDays    int `koanf:"station_max_age_days"`    // Default: 90 days
+	RouteMaxAgeDays      int `koanf:"route_max_age_days"`      // Default: 90 days
+	SpawnpointMaxAgeDays int `koanf:"spawnpoint_max_age_days"` // Default: 7 days (was hardcoded)
+
+	// Automatic trimming of stale data from Redis
+	TrimEnabled       bool `koanf:"trim_enabled"`        // Enable periodic trimming (default: true)
+	TrimIntervalHours int  `koanf:"trim_interval_hours"` // How often to trim (default: 24 hours)
+}
+
+// GetMaxAgeDays returns the max age for a given object type with defaults
+func (p *persistentCacheConfig) GetMaxAgeDays(objectType string) int {
+	switch objectType {
+	case "pokestop":
+		if p.PokestopMaxAgeDays > 0 {
+			return p.PokestopMaxAgeDays
+		}
+		return 30 // Default: 30 days
+	case "gym":
+		if p.GymMaxAgeDays > 0 {
+			return p.GymMaxAgeDays
+		}
+		return 30 // Default: 30 days
+	case "station":
+		if p.StationMaxAgeDays > 0 {
+			return p.StationMaxAgeDays
+		}
+		return 90 // Default: 90 days
+	case "route":
+		if p.RouteMaxAgeDays > 0 {
+			return p.RouteMaxAgeDays
+		}
+		return 90 // Default: 90 days
+	case "spawnpoint":
+		if p.SpawnpointMaxAgeDays > 0 {
+			return p.SpawnpointMaxAgeDays
+		}
+		return 7 // Default: 7 days (hot spawnpoints)
+	default:
+		return 30 // Generic default
+	}
 }
 
 type tuning struct {
@@ -142,13 +187,13 @@ type tuning struct {
 	MaxPokemonDistance float64 `koanf:"max_pokemon_distance"`
 	ProfileRoutes      bool    `koanf:"profile_routes"`
 	StartupDelaySec    int     `koanf:"startup_delay_sec"` // Delay after loading before GRPC starts (default: 0)
-	
+
 	// Force update intervals (seconds) - even if object hasn't changed
 	// Objects are re-saved after this interval to confirm they still exist
-	ForceUpdatePokestop  int64 `koanf:"force_update_pokestop"`  // Default: 900 (15 min)
-	ForceUpdateGym       int64 `koanf:"force_update_gym"`       // Default: 900 (15 min)
-	ForceUpdateStation   int64 `koanf:"force_update_station"`   // Default: 3600 (1 hour)
-	ForceUpdateRoute     int64 `koanf:"force_update_route"`     // Default: 86400 (24 hours)
+	ForceUpdatePokestop   int64 `koanf:"force_update_pokestop"`   // Default: 900 (15 min)
+	ForceUpdateGym        int64 `koanf:"force_update_gym"`        // Default: 900 (15 min)
+	ForceUpdateStation    int64 `koanf:"force_update_station"`    // Default: 3600 (1 hour)
+	ForceUpdateRoute      int64 `koanf:"force_update_route"`      // Default: 86400 (24 hours)
 	ForceUpdateSpawnpoint int64 `koanf:"force_update_spawnpoint"` // Default: 86400 (24 hours)
 }
 

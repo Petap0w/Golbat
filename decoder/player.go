@@ -192,14 +192,27 @@ var badgeTypeToPlayerKey = map[pogo.HoloBadgeType]string{
 }
 
 func getPlayerRecord(db db.DbDetails, name string, friendshipId string, friendCode string) (*Player, error) {
-	// L1 CACHE ONLY - no blocking I/O!
+	// L1 cache check (always fast, never blocks)
 	inMemoryPlayer := playerCache.Get(name)
 	if inMemoryPlayer != nil {
 		player := inMemoryPlayer.Value()
 		return &player, nil
 	}
 
-	// Not in L1 cache = return nil
+	// If Redis DISABLED, fall back to DB lookup (original behavior)
+	if !IsRedisEnabled() {
+		player := Player{}
+		err := db.GeneralDb.Get(&player, "SELECT * FROM player WHERE name = ?", name)
+		if err != nil {
+			return nil, nil // Not found or error
+		}
+		
+		// Populate L1 cache
+		playerCache.Set(name, player, ttlcache.DefaultTTL)
+		return &player, nil
+	}
+
+	// Redis ENABLED: L1 only (no blocking lookups)
 	return nil, nil
 }
 

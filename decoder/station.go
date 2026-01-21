@@ -51,15 +51,27 @@ type Station struct {
 }
 
 func getStationRecord(ctx context.Context, db db.DbDetails, stationId string) (*Station, error) {
-	// L1 CACHE ONLY - no blocking I/O!
-	// Stations are queued for DB writes, no need for blocking reads
+	// L1 cache check (always fast, never blocks)
 	inMemoryStation := stationCache.Get(stationId)
 	if inMemoryStation != nil {
 		station := inMemoryStation.Value()
 		return &station, nil
 	}
 
-	// Not in L1 cache = return nil (data will populate when scanned)
+	// If Redis DISABLED, fall back to DB lookup (original behavior)
+	if !IsRedisEnabled() {
+		station := Station{}
+		err := db.GeneralDb.GetContext(ctx, &station, "SELECT * FROM station WHERE id = ?", stationId)
+		if err != nil {
+			return nil, nil // Not found or error
+		}
+		
+		// Populate L1 cache
+		stationCache.Set(stationId, station, ttlcache.DefaultTTL)
+		return &station, nil
+	}
+
+	// Redis ENABLED: L1 only (no blocking lookups)
 	return nil, nil
 }
 
@@ -83,7 +95,7 @@ func saveStationRecord(ctx context.Context, db db.DbDetails, station *Station) {
 	// Update Redis fort cache (async, non-blocking) for fast restart + battle data preservation
 	if redisEnabled {
 		if jsonData, err := json.Marshal(station); err == nil {
-			updateFortCacheAsync("station", station.Id, jsonData)
+			updatePersistentCacheAsync("station", station.Id, jsonData)
 		}
 	}
 

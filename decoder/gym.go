@@ -115,16 +115,29 @@ type Gym struct {
 //WHERE table_schema = 'db_name' AND table_name = 'tbl_name'
 
 func GetGymRecord(ctx context.Context, db db.DbDetails, fortId string) (*Gym, error) {
-	// L1 CACHE ONLY - no blocking I/O!
-	// Gyms are NOT stored in Redis (only queued for DB writes)
-	// External services read from DB directly
+	// L1 cache check (always fast, never blocks)
 	inMemoryGym := getGymFromCache(fortId)
 	if inMemoryGym != nil {
 		gym := inMemoryGym.Value()
 		return &gym, nil
 	}
 
-	// Not in L1 cache = return nil (data will populate when scanned)
+	// If Redis DISABLED, fall back to DB lookup (original behavior for small deployments)
+	if !IsRedisEnabled() {
+		gym := Gym{}
+		err := db.GeneralDb.GetContext(ctx, &gym, "SELECT * FROM gym WHERE id = ?", fortId)
+		if err != nil {
+			return nil, nil // Not found or error
+		}
+
+		// Populate L1 cache
+		setGymCache(fortId, gym, ttlcache.DefaultTTL)
+		return &gym, nil
+	}
+
+	// Redis ENABLED: L1 only (no blocking lookups)
+	// All gyms loaded on startup from persistent_cache:gym
+	// Not in L1 = new gym, will be created on first GMO
 	return nil, nil
 }
 
@@ -663,7 +676,7 @@ func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
 	// Update Redis fort cache (async, non-blocking) for fast restart + data preservation
 	if redisEnabled {
 		if jsonData, err := json.Marshal(gym); err == nil {
-			updateFortCacheAsync("gym", gym.Id, jsonData)
+			updatePersistentCacheAsync("gym", gym.Id, jsonData)
 		}
 	}
 
