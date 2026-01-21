@@ -2,6 +2,7 @@ package decoder
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -170,13 +171,28 @@ func hasChangesStation(old *Station, new *Station) bool {
 }
 
 func (station *Station) updateFromStationProto(stationProto *pogo.StationProto, cellId uint64) *Station {
+	// Decode station ID if base64-encoded (some scanners send base64)
+	// Expected: 35260ae7e3374bffad3b699e463e1eee.23 (35 chars)
+	// Base64:   MzUyNjBhZTdlMzM3NGJmZmFkM2I2OTllNDYzZTFlZWUuMjM= (48 chars)
 	station.Id = stationProto.Id
+	if len(station.Id) > 35 {
+		// Likely base64, try decoding
+		if decoded, err := base64.StdEncoding.DecodeString(station.Id); err == nil {
+			station.Id = string(decoded)
+			log.Debugf("Decoded base64 station ID: %s", station.Id)
+		} else {
+			// Not base64, truncate to fit DB
+			station.Id = station.Id[:35]
+			log.Warnf("Truncating oversized station ID to 35 chars: %s", station.Id)
+		}
+	}
+
 	station.Name = stationProto.Name
 	// NOTE: Some names have more than 255 runes, which won't fit in our
 	// varchar(255).
 	if truncateStr, truncated := util.TruncateUTF8(stationProto.Name, 255); truncated {
 		log.Warnf("truncating name for station id '%s'",
-			stationProto.Id,
+			station.Id, // Use decoded ID in log
 		)
 		station.Name = truncateStr
 	}

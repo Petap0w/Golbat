@@ -46,8 +46,9 @@ func LoadFortsOnStartup(
 	pokestopCount, gymCount, stationCount, routeCount, err := loadFortsFromRedis(ctx, redisClient, setter)
 
 	if err != nil || (pokestopCount == 0 && gymCount == 0 && stationCount == 0 && routeCount == 0) {
-		// Fallback to database if Redis is empty or failed (20-30s)
-		log.Warnf("Redis cache unavailable (%v), using optimized DB fallback...", err)
+		// Fallback to database if Redis is empty or failed
+		// Load sequentially to avoid resource exhaustion
+		log.Warnf("Redis cache unavailable (%v), loading from database...", err)
 		return loadFortsFromDatabase(ctx, dbConn, setter)
 	}
 
@@ -148,103 +149,68 @@ func loadFortHashFromRedis(
 }
 
 // loadFortsFromDatabase loads forts from database using OPTIMIZED streaming queries
-// All 4 types loaded in parallel for maximum speed (20-30s)
+// Loads SEQUENTIALLY (not parallel) to avoid resource exhaustion
+// Takes longer but prevents context deadline exceeded errors
 func loadFortsFromDatabase(
 	ctx context.Context,
 	dbConn *sqlx.DB,
 	setter FortSetter,
 ) error {
 	start := time.Now()
-	log.Info("Loading static objects from database (4x parallel)...")
+	log.Info("Loading static objects from database (sequential to avoid resource spike)...")
 
-	var pokestopCount, gymCount, stationCount, routeCount atomic.Int64
-	var wg sync.WaitGroup
-	wg.Add(4) // Load all 4 types in parallel
+	// Load sequentially to avoid overwhelming DB/CPU/memory
+	// Each table loads completely before next one starts
 
-	// Load pokestops
-	go func() {
-		defer wg.Done()
-		count := streamTableToCache(ctx, dbConn, "pokestop", setter.SetPokestop)
-		pokestopCount.Store(count)
-	}()
+	log.Info("Loading pokestops from database...")
+	pokestopCount := loadPokestopsFromDB(ctx, dbConn, setter)
+	log.Infof("Loaded %d pokestops", pokestopCount)
 
-	// Load gyms
-	go func() {
-		defer wg.Done()
-		count := streamTableToCache(ctx, dbConn, "gym", setter.SetGym)
-		gymCount.Store(count)
-	}()
+	log.Info("Loading gyms from database...")
+	gymCount := loadGymsFromDB(ctx, dbConn, setter)
+	log.Infof("Loaded %d gyms", gymCount)
 
-	// Load stations
-	go func() {
-		defer wg.Done()
-		count := streamTableToCache(ctx, dbConn, "station", setter.SetStation)
-		stationCount.Store(count)
-	}()
+	log.Info("Loading stations from database...")
+	stationCount := loadStationsFromDB(ctx, dbConn, setter)
+	log.Infof("Loaded %d stations", stationCount)
 
-	// Load routes
-	go func() {
-		defer wg.Done()
-		count := streamTableToCache(ctx, dbConn, "route", setter.SetRoute)
-		routeCount.Store(count)
-	}()
-
-	wg.Wait()
+	log.Info("Loading routes from database...")
+	routeCount := loadRoutesFromDB(ctx, dbConn, setter)
+	log.Infof("Loaded %d routes", routeCount)
 
 	log.Infof("Loaded from DB in %v: %d pokestops, %d gyms, %d stations, %d routes",
-		time.Since(start), pokestopCount.Load(), gymCount.Load(), 
-		stationCount.Load(), routeCount.Load())
+		time.Since(start), pokestopCount, gymCount, stationCount, routeCount)
 
 	return nil
 }
 
-// streamTableToCache uses streaming SELECT to load table data
-// Memory-efficient: doesn't load entire table into memory
-func streamTableToCache(
+// streamTableToCacheDirect uses streaming SELECT with StructScan
+// Memory-efficient + zero JSON overhead for maximum performance
+func streamTableToCacheDirect(
 	ctx context.Context,
 	dbConn *sqlx.DB,
 	tableName string,
-	setFunc func(string, []byte) error,
+	scanFunc func(*sqlx.Rows) error,
 ) int64 {
 	query := "SELECT * FROM " + tableName
 	rows, err := dbConn.QueryxContext(ctx, query)
 	if err != nil {
-		log.Errorf("Failed to query %s: %v", tableName, err)
+		log.Errorf("Failed to query %s table: %v", tableName, err)
 		return 0
 	}
 	defer rows.Close()
 
-	var count int64
+	var count, errorCount int64
 	lastLog := time.Now()
+	start := time.Now()
 
 	for rows.Next() {
-		// Scan into map for flexibility (handles all columns)
-		result := make(map[string]interface{})
-		if err := rows.MapScan(result); err != nil {
-			log.Debugf("Failed to scan row: %v", err)
-			continue
-		}
-
-		// Extract ID
-		id, ok := result["id"].([]byte)
-		if !ok {
-			// Try string type
-			if idStr, ok := result["id"].(string); ok {
-				id = []byte(idStr)
-			} else {
-				continue
+		// Direct StructScan into the type (no JSON overhead!)
+		if err := scanFunc(rows); err != nil {
+			errorCount++
+			if errorCount <= 10 { // Log first 10 errors only
+				log.Errorf("Failed to scan %s row #%d: %v", tableName, count+errorCount, err)
 			}
-		}
-
-		// Convert to JSON for storage
-		jsonData, err := json.Marshal(result)
-		if err != nil {
-			continue
-		}
-
-		// Populate L1 cache
-		if err := setFunc(string(id), jsonData); err != nil {
-			log.Debugf("Failed to set %s: %v", string(id), err)
 			continue
 		}
 
@@ -252,12 +218,132 @@ func streamTableToCache(
 
 		// Progress logging every 10 seconds
 		if time.Since(lastLog) > 10*time.Second {
-			log.Infof("Loading %s: %d loaded...", tableName, count)
+			elapsed := time.Since(start)
+			log.Infof("Loading %s: %d loaded (%.1f/sec)...", tableName, count, float64(count)/elapsed.Seconds())
 			lastLog = time.Now()
 		}
 	}
 
+	if err := rows.Err(); err != nil {
+		log.Errorf("Error iterating %s rows: %v", tableName, err)
+	}
+
+	if errorCount > 0 {
+		log.Warnf("Loaded %s with %d errors (skipped %d rows)", tableName, errorCount, errorCount)
+	}
+
 	return count
+}
+
+// loadPokestopsFromDB streams pokestops from DB into L1 cache
+func loadPokestopsFromDB(ctx context.Context, dbConn *sqlx.DB, setter FortSetter) int64 {
+	return streamTableToCacheDirect(ctx, dbConn, "pokestop",
+		func(rows *sqlx.Rows) error {
+			// Scan directly into map
+			result := make(map[string]interface{})
+			if err := rows.MapScan(result); err != nil {
+				return err
+			}
+
+			// Extract ID
+			id, ok := result["id"].([]byte)
+			if !ok {
+				if idStr, ok := result["id"].(string); ok {
+					id = []byte(idStr)
+				} else {
+					return nil // Skip if no ID
+				}
+			}
+
+			// Marshal to JSON for setter
+			jsonData, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+
+			return setter.SetPokestop(string(id), jsonData)
+		})
+}
+
+// loadGymsFromDB streams gyms from DB into L1 cache
+func loadGymsFromDB(ctx context.Context, dbConn *sqlx.DB, setter FortSetter) int64 {
+	return streamTableToCacheDirect(ctx, dbConn, "gym",
+		func(rows *sqlx.Rows) error {
+			result := make(map[string]interface{})
+			if err := rows.MapScan(result); err != nil {
+				return err
+			}
+
+			id, ok := result["id"].([]byte)
+			if !ok {
+				if idStr, ok := result["id"].(string); ok {
+					id = []byte(idStr)
+				} else {
+					return nil
+				}
+			}
+
+			jsonData, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+
+			return setter.SetGym(string(id), jsonData)
+		})
+}
+
+// loadStationsFromDB streams stations from DB into L1 cache
+func loadStationsFromDB(ctx context.Context, dbConn *sqlx.DB, setter FortSetter) int64 {
+	return streamTableToCacheDirect(ctx, dbConn, "station",
+		func(rows *sqlx.Rows) error {
+			result := make(map[string]interface{})
+			if err := rows.MapScan(result); err != nil {
+				return err
+			}
+
+			id, ok := result["id"].([]byte)
+			if !ok {
+				if idStr, ok := result["id"].(string); ok {
+					id = []byte(idStr)
+				} else {
+					return nil
+				}
+			}
+
+			jsonData, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+
+			return setter.SetStation(string(id), jsonData)
+		})
+}
+
+// loadRoutesFromDB streams routes from DB into L1 cache
+func loadRoutesFromDB(ctx context.Context, dbConn *sqlx.DB, setter FortSetter) int64 {
+	return streamTableToCacheDirect(ctx, dbConn, "route",
+		func(rows *sqlx.Rows) error {
+			result := make(map[string]interface{})
+			if err := rows.MapScan(result); err != nil {
+				return err
+			}
+
+			id, ok := result["id"].([]byte)
+			if !ok {
+				if idStr, ok := result["id"].(string); ok {
+					id = []byte(idStr)
+				} else {
+					return nil
+				}
+			}
+
+			jsonData, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+
+			return setter.SetRoute(string(id), jsonData)
+		})
 }
 
 // UpdateFortCacheAsync updates Redis fort cache asynchronously

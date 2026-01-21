@@ -141,6 +141,7 @@ type tuning struct {
 	MaxPokemonResults  int     `koanf:"max_pokemon_results"`
 	MaxPokemonDistance float64 `koanf:"max_pokemon_distance"`
 	ProfileRoutes      bool    `koanf:"profile_routes"`
+	StartupDelaySec    int     `koanf:"startup_delay_sec"` // Delay after loading before GRPC starts (default: 0)
 	
 	// Force update intervals (seconds) - even if object hasn't changed
 	// Objects are re-saved after this interval to confirm they still exist

@@ -65,6 +65,9 @@ max_pokemon_distance = 100  # Maximum distance in kilometers for searching pokem
 max_pokemon_results = 3000  # Maximum number of pokemon to return
 extended_timeout = false
 profile_routes = false
+startup_delay_sec = 0  # Delay (seconds) after data loading before GRPC accepts traffic
+                       # Set to 10-30 if using DB fallback loading to let system stabilize
+                       # Set to 0 if loading from Redis (no delay needed)
 
 # Force update intervals (seconds) - objects are re-saved after this interval even if unchanged
 # This confirms objects still exist and prevents stale data

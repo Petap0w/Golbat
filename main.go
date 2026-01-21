@@ -349,6 +349,12 @@ func main() {
 		go decoder.LoadAllGyms(dbDetails)
 	}
 
+	// Optional delay to let system stabilize after loading (useful if DB fallback was used)
+	if cfg.Tuning.StartupDelaySec > 0 {
+		log.Infof("Waiting %d seconds for system to stabilize before accepting traffic...", cfg.Tuning.StartupDelaySec)
+		time.Sleep(time.Duration(cfg.Tuning.StartupDelaySec) * time.Second)
+	}
+
 	// Start the GRPC receiver
 
 	if cfg.GrpcPort > 0 {
