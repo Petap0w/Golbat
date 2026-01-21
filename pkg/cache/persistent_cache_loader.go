@@ -217,7 +217,7 @@ func streamTableToCacheDirect(
 		log.Warnf("Failed to count %s rows: %v (progress % will not be shown)", tableName, err)
 		totalRows = 0 // Continue without total
 	} else {
-		log.Infof("Loading %s from database... (total: %d rows)", tableName, totalRows)
+		log.Infof("Processing %d rows of %s from database...", totalRows, tableName)
 	}
 
 	query := "SELECT * FROM " + tableName
@@ -254,7 +254,7 @@ func streamTableToCacheDirect(
 				pct := float64(count) / float64(totalRows) * 100
 				log.Infof("Loading %s: %d/%d (%.1f%%, %.1f/sec)...", tableName, count, totalRows, pct, float64(count)/elapsed.Seconds())
 			} else {
-			log.Infof("Loading %s: %d loaded (%.1f/sec)...", tableName, count, float64(count)/elapsed.Seconds())
+				log.Infof("Loading %s: %d loaded (%.1f/sec)...", tableName, count, float64(count)/elapsed.Seconds())
 			}
 			lastLog = time.Now()
 		}
@@ -280,7 +280,7 @@ func loadPokestopsFromDB(ctx context.Context, dbConn *sqlx.DB, setter Persistent
 		Lon                          float64     `db:"lon"`
 		Name                         null.String `db:"name"`
 		Url                          null.String `db:"url"`
-		Enabled                      null.Int    `db:"enabled"` // TINYINT unsigned (0/1), not BOOL
+		Enabled                      null.Bool   `db:"enabled"` // TINYINT unsigned → StructScan converts to bool
 		LureExpireTimestamp          null.Int    `db:"lure_expire_timestamp"`
 		LastModifiedTimestamp        null.Int    `db:"last_modified_timestamp"`
 		Updated                      int64       `db:"updated"`
@@ -309,7 +309,7 @@ func loadPokestopsFromDB(ctx context.Context, dbConn *sqlx.DB, setter Persistent
 		AlternativeQuestRewardAmount null.Int    `db:"alternative_quest_reward_amount"` // VIRTUAL/GENERATED
 		AlternativeQuestExpiry       null.Int    `db:"alternative_quest_expiry"`
 		CellId                       null.Int    `db:"cell_id"`
-		Deleted                      int         `db:"deleted"` // TINYINT unsigned (0/1), not BOOL
+		Deleted                      bool        `db:"deleted"` // TINYINT unsigned → StructScan converts to bool
 		LureId                       null.Int    `db:"lure_id"`
 		FirstSeenTimestamp           int64       `db:"first_seen_timestamp"`
 		SponsorId                    null.Int    `db:"sponsor_id"`
@@ -355,48 +355,48 @@ func loadPokestopsFromDB(ctx context.Context, dbConn *sqlx.DB, setter Persistent
 func loadGymsFromDB(ctx context.Context, dbConn *sqlx.DB, setter PersistentCacheSetter) int64 {
 	// Lightweight struct matching DB schema (avoids import cycle with decoder)
 	type Gym struct {
-		Id                      string      `db:"id"`
-		Lat                     float64     `db:"lat"`
-		Lon                     float64     `db:"lon"`
-		Name                    null.String `db:"name"`
-		Url                     null.String `db:"url"`
-		LastModifiedTimestamp   null.Int    `db:"last_modified_timestamp"`
-		RaidEndTimestamp        null.Int    `db:"raid_end_timestamp"`
-		RaidSpawnTimestamp      null.Int    `db:"raid_spawn_timestamp"`
-		RaidBattleTimestamp     null.Int    `db:"raid_battle_timestamp"`
-		Updated                 int64       `db:"updated"`
-		RaidPokemonId           null.Int    `db:"raid_pokemon_id"`
-		GuardingPokemonId       null.Int    `db:"guarding_pokemon_id"`
-		GuardingPokemonDisplay  null.String `db:"guarding_pokemon_display"` // TEXT (added in migration 28)
-		AvailableSlots          null.Int    `db:"available_slots"`
-		AvailbleSlots           null.Int    `db:"availble_slots"` // VIRTUAL (typo in schema but exists)
-		TeamId                  null.Int    `db:"team_id"`
-		RaidLevel               null.Int    `db:"raid_level"`
-		Enabled                 null.Int    `db:"enabled"`          // TINYINT unsigned (0/1), not BOOL
-		ExRaidEligible          null.Int    `db:"ex_raid_eligible"` // TINYINT unsigned (0/1), not BOOL
-		InBattle                null.Int    `db:"in_battle"`        // TINYINT unsigned (0/1), not BOOL
-		RaidPokemonMove1        null.Int    `db:"raid_pokemon_move_1"`
-		RaidPokemonMove2        null.Int    `db:"raid_pokemon_move_2"`
-		RaidPokemonForm         null.Int    `db:"raid_pokemon_form"`
-		RaidPokemonAlignment    null.Int    `db:"raid_pokemon_alignment"` // Added in migration 18
-		RaidPokemonCp           null.Int    `db:"raid_pokemon_cp"`
-		RaidIsExclusive         null.Int    `db:"raid_is_exclusive"` // TINYINT unsigned (0/1), not BOOL
-		CellId                  null.Int    `db:"cell_id"`
-		Deleted                 int         `db:"deleted"` // TINYINT unsigned (0/1), not BOOL
-		TotalCp                 null.Int    `db:"total_cp"`
-		FirstSeenTimestamp      int64       `db:"first_seen_timestamp"`
-		RaidPokemonGender       null.Int    `db:"raid_pokemon_gender"`
-		SponsorId               null.Int    `db:"sponsor_id"`
-		PartnerId               null.String `db:"partner_id"`
-		RaidPokemonCostume      null.Int    `db:"raid_pokemon_costume"`
-		RaidPokemonEvolution    null.Int    `db:"raid_pokemon_evolution"`
-		ArScanEligible          null.Int    `db:"ar_scan_eligible"`
-		PowerUpLevel            null.Int    `db:"power_up_level"`
-		PowerUpPoints           null.Int    `db:"power_up_points"`
-		PowerUpEndTimestamp     null.Int    `db:"power_up_end_timestamp"`
-		Description             null.String `db:"description"` // TEXT
-		Defenders               null.String `db:"defenders"`   // TEXT (added in migration 40)
-		Rsvps                   null.String `db:"rsvps"`       // TEXT (added in migration 46)
+		Id                     string      `db:"id"`
+		Lat                    float64     `db:"lat"`
+		Lon                    float64     `db:"lon"`
+		Name                   null.String `db:"name"`
+		Url                    null.String `db:"url"`
+		LastModifiedTimestamp  null.Int    `db:"last_modified_timestamp"`
+		RaidEndTimestamp       null.Int    `db:"raid_end_timestamp"`
+		RaidSpawnTimestamp     null.Int    `db:"raid_spawn_timestamp"`
+		RaidBattleTimestamp    null.Int    `db:"raid_battle_timestamp"`
+		Updated                int64       `db:"updated"`
+		RaidPokemonId          null.Int    `db:"raid_pokemon_id"`
+		GuardingPokemonId      null.Int    `db:"guarding_pokemon_id"`
+		GuardingPokemonDisplay null.String `db:"guarding_pokemon_display"` // TEXT (added in migration 28)
+		AvailableSlots         null.Int    `db:"available_slots"`
+		AvailbleSlots          null.Int    `db:"availble_slots"` // VIRTUAL (typo in schema but exists)
+		TeamId                 null.Int    `db:"team_id"`
+		RaidLevel              null.Int    `db:"raid_level"`
+		Enabled                null.Bool   `db:"enabled"`          // TINYINT unsigned → StructScan converts to bool
+		ExRaidEligible         null.Bool   `db:"ex_raid_eligible"` // TINYINT unsigned → StructScan converts to bool
+		InBattle               null.Bool   `db:"in_battle"`        // TINYINT unsigned → StructScan converts to bool
+		RaidPokemonMove1       null.Int    `db:"raid_pokemon_move_1"`
+		RaidPokemonMove2       null.Int    `db:"raid_pokemon_move_2"`
+		RaidPokemonForm        null.Int    `db:"raid_pokemon_form"`
+		RaidPokemonAlignment   null.Int    `db:"raid_pokemon_alignment"` // Added in migration 18
+		RaidPokemonCp          null.Int    `db:"raid_pokemon_cp"`
+		RaidIsExclusive        null.Bool   `db:"raid_is_exclusive"` // TINYINT unsigned → StructScan converts to bool
+		CellId                 null.Int    `db:"cell_id"`
+		Deleted                bool        `db:"deleted"` // TINYINT unsigned → StructScan converts to bool
+		TotalCp                null.Int    `db:"total_cp"`
+		FirstSeenTimestamp     int64       `db:"first_seen_timestamp"`
+		RaidPokemonGender      null.Int    `db:"raid_pokemon_gender"`
+		SponsorId              null.Int    `db:"sponsor_id"`
+		PartnerId              null.String `db:"partner_id"`
+		RaidPokemonCostume     null.Int    `db:"raid_pokemon_costume"`
+		RaidPokemonEvolution   null.Int    `db:"raid_pokemon_evolution"`
+		ArScanEligible         null.Int    `db:"ar_scan_eligible"`
+		PowerUpLevel           null.Int    `db:"power_up_level"`
+		PowerUpPoints          null.Int    `db:"power_up_points"`
+		PowerUpEndTimestamp    null.Int    `db:"power_up_end_timestamp"`
+		Description            null.String `db:"description"` // TEXT
+		Defenders              null.String `db:"defenders"`   // TEXT (added in migration 40)
+		Rsvps                  null.String `db:"rsvps"`       // TEXT (added in migration 46)
 	}
 
 	// Only load recent gyms (configurable max age)
@@ -545,7 +545,7 @@ func loadSpawnpointsFromDB(ctx context.Context, dbConn *sqlx.DB, setter Persiste
 		WHERE last_seen > UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL %d DAY))
 		ORDER BY id
 	`, maxAgeDays)
-	
+
 	rows, err := dbConn.QueryxContext(ctx, query)
 	if err != nil {
 		log.Errorf("Failed to query hot spawnpoints: %v", err)
@@ -673,23 +673,23 @@ func GetPersistentCacheStats(ctx context.Context, redisClient *redis.Client) (po
 // StartPersistentCacheTrimmer starts a background goroutine to periodically trim stale data from Redis
 func StartPersistentCacheTrimmer(redisClient *redis.Client) {
 	cfg := config.Config.Redis.PersistentCacheConfig
-	
+
 	if !cfg.TrimEnabled {
 		log.Info("Persistent cache trimming disabled")
 		return
 	}
-	
+
 	trimInterval := time.Duration(cfg.TrimIntervalHours) * time.Hour
 	if trimInterval == 0 {
 		trimInterval = 24 * time.Hour // Default: trim every 24 hours
 	}
-	
+
 	log.Infof("Starting persistent cache trimmer (interval: %v)", trimInterval)
-	
+
 	go func() {
 		ticker := time.NewTicker(trimInterval)
 		defer ticker.Stop()
-		
+
 		for range ticker.C {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			trimPersistentCache(ctx, redisClient)
@@ -702,18 +702,18 @@ func StartPersistentCacheTrimmer(redisClient *redis.Client) {
 func trimPersistentCache(ctx context.Context, redisClient *redis.Client) {
 	start := time.Now()
 	log.Info("Starting persistent cache trimming...")
-	
+
 	cfg := config.Config.Redis.PersistentCacheConfig
-	
+
 	// Trim each object type based on its max age
 	totalDeleted := 0
-	
+
 	totalDeleted += trimCacheHash(ctx, redisClient, "persistent_cache:pokestop", cfg.GetMaxAgeDays("pokestop"))
 	totalDeleted += trimCacheHash(ctx, redisClient, "persistent_cache:gym", cfg.GetMaxAgeDays("gym"))
 	totalDeleted += trimCacheHash(ctx, redisClient, "persistent_cache:station", cfg.GetMaxAgeDays("station"))
 	totalDeleted += trimCacheHash(ctx, redisClient, "persistent_cache:route", cfg.GetMaxAgeDays("route"))
 	totalDeleted += trimCacheHash(ctx, redisClient, "persistent_cache:spawnpoint", cfg.GetMaxAgeDays("spawnpoint"))
-	
+
 	log.Infof("Persistent cache trimming complete: deleted %d stale entries in %v", totalDeleted, time.Since(start))
 }
 
@@ -721,20 +721,20 @@ func trimPersistentCache(ctx context.Context, redisClient *redis.Client) {
 func trimCacheHash(ctx context.Context, redisClient *redis.Client, hashKey string, maxAgeDays int) int {
 	cutoffTime := time.Now().Unix() - int64(maxAgeDays*86400)
 	deleted := 0
-	
+
 	// Use HSCAN to iterate through all entries efficiently
 	var cursor uint64
 	for {
 		var keys []string
 		var values []string
 		var err error
-		
+
 		keys, cursor, err = redisClient.HScan(ctx, hashKey, cursor, "*", 1000).Result()
 		if err != nil {
 			log.Errorf("Failed to scan %s: %v", hashKey, err)
 			break
 		}
-		
+
 		// HSCAN returns key-value pairs as a flat list: [key1, val1, key2, val2, ...]
 		// Extract keys and values
 		for i := 0; i < len(keys); i += 2 {
@@ -744,7 +744,7 @@ func trimCacheHash(ctx context.Context, redisClient *redis.Client, hashKey strin
 			}
 		}
 		keys = keys[:len(values)]
-		
+
 		// Check each entry's age and delete if stale
 		toDelete := []string{}
 		for i, jsonData := range values {
@@ -753,7 +753,7 @@ func trimCacheHash(ctx context.Context, redisClient *redis.Client, hashKey strin
 			if err := json.Unmarshal([]byte(jsonData), &data); err != nil {
 				continue // Skip malformed data
 			}
-			
+
 			// Check 'updated' field (for pokestops/gyms/stations/routes) or 'last_seen' (for spawnpoints)
 			var timestamp int64
 			if updated, ok := data["updated"].(float64); ok {
@@ -763,13 +763,13 @@ func trimCacheHash(ctx context.Context, redisClient *redis.Client, hashKey strin
 			} else {
 				continue // No timestamp field, keep it
 			}
-			
+
 			// If older than cutoff, mark for deletion
 			if timestamp < cutoffTime {
 				toDelete = append(toDelete, keys[i])
 			}
 		}
-		
+
 		// Batch delete stale entries
 		if len(toDelete) > 0 {
 			if err := redisClient.HDel(ctx, hashKey, toDelete...).Err(); err != nil {
@@ -778,17 +778,17 @@ func trimCacheHash(ctx context.Context, redisClient *redis.Client, hashKey strin
 				deleted += len(toDelete)
 			}
 		}
-		
+
 		// If cursor is 0, we've scanned all entries
 		if cursor == 0 {
 			break
 		}
 	}
-	
+
 	if deleted > 0 {
 		log.Infof("Trimmed %d stale entries from %s", deleted, hashKey)
 	}
-	
+
 	return deleted
 }
 
