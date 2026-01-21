@@ -63,7 +63,7 @@ func getIncidentRecord(ctx context.Context, db db.DbDetails, incidentId string) 
 		if err != nil {
 			return nil, nil // Not found or error
 		}
-		
+
 		// Populate L1 cache
 		incidentCache.Set(incidentId, incident, ttlcache.DefaultTTL)
 		return &incident, nil

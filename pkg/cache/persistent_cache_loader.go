@@ -305,7 +305,7 @@ func loadPokestopsFromDB(ctx context.Context, dbConn *sqlx.DB, setter Persistent
 		ShowcasePokemonFormId        null.Int    `db:"showcase_pokemon_form_id"`
 		ShowcasePokemonTypeId        null.Int    `db:"showcase_pokemon_type_id"`
 		ShowcaseRankingStandard      null.Int    `db:"showcase_ranking_standard"`
-		ShowcaseFocus                null.Int    `db:"showcase_focus"`
+		ShowcaseFocus                null.String `db:"showcase_focus"` // TEXT (JSON), not INT
 		ShowcaseExpiry               null.Int    `db:"showcase_expiry"`
 		ShowcaseRankings             null.String `db:"showcase_rankings"`
 	}
@@ -337,43 +337,48 @@ func loadPokestopsFromDB(ctx context.Context, dbConn *sqlx.DB, setter Persistent
 func loadGymsFromDB(ctx context.Context, dbConn *sqlx.DB, setter PersistentCacheSetter) int64 {
 	// Lightweight struct matching DB schema (avoids import cycle with decoder)
 	type Gym struct {
-		Id                    string      `db:"id"`
-		Lat                   float64     `db:"lat"`
-		Lon                   float64     `db:"lon"`
-		Name                  null.String `db:"name"`
-		Url                   null.String `db:"url"`
-		LastModifiedTimestamp null.Int    `db:"last_modified_timestamp"`
-		RaidEndTimestamp      null.Int    `db:"raid_end_timestamp"`
-		RaidSpawnTimestamp    null.Int    `db:"raid_spawn_timestamp"`
-		RaidBattleTimestamp   null.Int    `db:"raid_battle_timestamp"`
-		Updated               int64       `db:"updated"`
-		RaidPokemonId         null.Int    `db:"raid_pokemon_id"`
-		GuardingPokemonId     null.Int    `db:"guarding_pokemon_id"`
-		AvailableSlots        null.Int    `db:"available_slots"`
-		AvailbleSlots         null.Int    `db:"availble_slots"` // VIRTUAL (typo in schema but exists)
-		TeamId                null.Int    `db:"team_id"`
-		RaidLevel             null.Int    `db:"raid_level"`
-		Enabled               null.Bool   `db:"enabled"`
-		ExRaidEligible        null.Bool   `db:"ex_raid_eligible"`
-		InBattle              null.Bool   `db:"in_battle"`
-		RaidPokemonMove1      null.Int    `db:"raid_pokemon_move_1"`
-		RaidPokemonMove2      null.Int    `db:"raid_pokemon_move_2"`
-		RaidPokemonForm       null.Int    `db:"raid_pokemon_form"`
-		RaidPokemonCp         null.Int    `db:"raid_pokemon_cp"`
-		RaidIsExclusive       null.Bool   `db:"raid_is_exclusive"`
-		CellId                null.Int    `db:"cell_id"`
-		Deleted               bool        `db:"deleted"`
-		TotalCp               null.Int    `db:"total_cp"`
-		FirstSeenTimestamp    int64       `db:"first_seen_timestamp"`
-		RaidPokemonGender     null.Int    `db:"raid_pokemon_gender"`
-		SponsorId             null.Int    `db:"sponsor_id"`
-		PartnerId             null.String `db:"partner_id"`
-		RaidPokemonCostume    null.Int    `db:"raid_pokemon_costume"`
-		RaidPokemonEvolution  null.Int    `db:"raid_pokemon_evolution"`
-		ArScanEligible        null.Int    `db:"ar_scan_eligible"`
-		PowerUpLevel          null.Int    `db:"power_up_level"`
-		PowerUpPoints         null.Int    `db:"power_up_points"`
-		PowerUpEndTimestamp   null.Int    `db:"power_up_end_timestamp"`
+		Id                      string      `db:"id"`
+		Lat                     float64     `db:"lat"`
+		Lon                     float64     `db:"lon"`
+		Name                    null.String `db:"name"`
+		Url                     null.String `db:"url"`
+		LastModifiedTimestamp   null.Int    `db:"last_modified_timestamp"`
+		RaidEndTimestamp        null.Int    `db:"raid_end_timestamp"`
+		RaidSpawnTimestamp      null.Int    `db:"raid_spawn_timestamp"`
+		RaidBattleTimestamp     null.Int    `db:"raid_battle_timestamp"`
+		Updated                 int64       `db:"updated"`
+		RaidPokemonId           null.Int    `db:"raid_pokemon_id"`
+		GuardingPokemonId       null.Int    `db:"guarding_pokemon_id"`
+		GuardingPokemonDisplay  null.String `db:"guarding_pokemon_display"` // TEXT (added in migration 28)
+		AvailableSlots          null.Int    `db:"available_slots"`
+		AvailbleSlots           null.Int    `db:"availble_slots"` // VIRTUAL (typo in schema but exists)
+		TeamId                  null.Int    `db:"team_id"`
+		RaidLevel               null.Int    `db:"raid_level"`
+		Enabled                 null.Bool   `db:"enabled"`
+		ExRaidEligible          null.Bool   `db:"ex_raid_eligible"`
+		InBattle                null.Bool   `db:"in_battle"`
+		RaidPokemonMove1        null.Int    `db:"raid_pokemon_move_1"`
+		RaidPokemonMove2        null.Int    `db:"raid_pokemon_move_2"`
+		RaidPokemonForm         null.Int    `db:"raid_pokemon_form"`
+		RaidPokemonAlignment    null.Int    `db:"raid_pokemon_alignment"` // Added in migration 18
+		RaidPokemonCp           null.Int    `db:"raid_pokemon_cp"`
+		RaidIsExclusive         null.Bool   `db:"raid_is_exclusive"`
+		CellId                  null.Int    `db:"cell_id"`
+		Deleted                 bool        `db:"deleted"`
+		TotalCp                 null.Int    `db:"total_cp"`
+		FirstSeenTimestamp      int64       `db:"first_seen_timestamp"`
+		RaidPokemonGender       null.Int    `db:"raid_pokemon_gender"`
+		SponsorId               null.Int    `db:"sponsor_id"`
+		PartnerId               null.String `db:"partner_id"`
+		RaidPokemonCostume      null.Int    `db:"raid_pokemon_costume"`
+		RaidPokemonEvolution    null.Int    `db:"raid_pokemon_evolution"`
+		ArScanEligible          null.Int    `db:"ar_scan_eligible"`
+		PowerUpLevel            null.Int    `db:"power_up_level"`
+		PowerUpPoints           null.Int    `db:"power_up_points"`
+		PowerUpEndTimestamp     null.Int    `db:"power_up_end_timestamp"`
+		Description             null.String `db:"description"` // TEXT
+		Defenders               null.String `db:"defenders"`   // TEXT (added in migration 40)
+		Rsvps                   null.String `db:"rsvps"`       // TEXT (added in migration 46)
 	}
 
 	// Only load recent gyms (configurable max age)
