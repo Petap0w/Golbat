@@ -186,9 +186,9 @@ func main() {
 		if cfg.Redis.LoadHotOnStartup {
 			log.Info("Loading hot data into Redis...")
 
-			// Load hot spawnpoints (last 7 days)
+			// Load hot spawnpoints (last 7 days) into BOTH L1 and Redis
 			// NOTE: Pokestops/gyms are NOT loaded to Redis - they use L1 cache only
-			if err := spawnpointLoader.LoadHotSpawnpointsOnStartup(ctx); err != nil {
+			if err := spawnpointLoader.LoadHotSpawnpointsOnStartup(ctx, decoder.PopulateSpawnpointL1Cache); err != nil {
 				log.Errorf("Failed to load hot spawnpoints: %s", err)
 			}
 

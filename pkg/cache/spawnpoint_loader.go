@@ -133,13 +133,17 @@ func (s *SpawnpointLoader) loadFromDB(ctx context.Context, ids []int64, result m
 	return nil
 }
 
-// LoadHotSpawnpointsOnStartup loads active spawnpoints into Redis
-func (s *SpawnpointLoader) LoadHotSpawnpointsOnStartup(ctx context.Context) error {
+// SpawnpointL1Setter is a function type for setting L1 cache entries (avoids import cycle with decoder package)
+type SpawnpointL1Setter func(id int64, lat, lon float64, despawnSec *int64, updated, lastSeen int64)
+
+// LoadHotSpawnpointsOnStartup loads active spawnpoints into L1 cache and Redis
+// l1Setter is a callback to populate L1 cache (provided by decoder package to avoid import cycles)
+func (s *SpawnpointLoader) LoadHotSpawnpointsOnStartup(ctx context.Context, l1Setter SpawnpointL1Setter) error {
 	if s.l2Cache == nil {
 		return fmt.Errorf("L2 cache not available")
 	}
 
-	log.Info("Loading hot spawnpoints (last 7 days) into Redis...")
+	log.Info("Loading hot spawnpoints (last 7 days) into L1 cache and Redis...")
 	startTime := time.Now()
 
 	// Load spawnpoints seen in the last 7 days
@@ -153,7 +157,7 @@ func (s *SpawnpointLoader) LoadHotSpawnpointsOnStartup(ctx context.Context) erro
 
 	log.Infof("Found %d hot spawnpoints to load", len(records))
 
-	// Batch write to Redis in chunks
+	// Batch write to Redis and L1 cache in chunks
 	chunkSize := 10000
 	for i := 0; i < len(records); i += chunkSize {
 		end := i + chunkSize
@@ -172,6 +176,11 @@ func (s *SpawnpointLoader) LoadHotSpawnpointsOnStartup(ctx context.Context) erro
 				Updated:    sp.Updated,
 				LastSeen:   sp.LastSeen,
 			}
+
+			// ALSO populate L1 cache via callback!
+			if l1Setter != nil {
+				l1Setter(sp.Id, sp.Lat, sp.Lon, sp.DespawnSec, sp.Updated, sp.LastSeen)
+			}
 		}
 
 		if err := s.l2Cache.BatchSetSpawnpoints(ctx, toRedis); err != nil {
@@ -179,11 +188,11 @@ func (s *SpawnpointLoader) LoadHotSpawnpointsOnStartup(ctx context.Context) erro
 			continue
 		}
 
-		log.Debugf("Loaded spawnpoints %d-%d to Redis", i, end)
+		log.Debugf("Loaded spawnpoints %d-%d to L1 cache and Redis", i, end)
 	}
 
 	duration := time.Since(startTime)
-	log.Infof("Loaded %d hot spawnpoints to Redis in %s", len(records), duration)
+	log.Infof("Loaded %d hot spawnpoints to L1 cache and Redis in %s", len(records), duration)
 
 	return nil
 }

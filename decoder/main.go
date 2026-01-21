@@ -99,6 +99,19 @@ func GetSpawnpointCache() *ttlcache.Cache[int64, Spawnpoint] {
 	return spawnpointCache
 }
 
+// PopulateSpawnpointL1Cache adds a spawnpoint to the L1 cache (used during startup loading)
+func PopulateSpawnpointL1Cache(id int64, lat, lon float64, despawnSec *int64, updated, lastSeen int64) {
+	spawnpoint := Spawnpoint{
+		Id:         id,
+		Lat:        lat,
+		Lon:        lon,
+		DespawnSec: null.IntFromPtr(despawnSec),
+		Updated:    updated,
+		LastSeen:   lastSeen,
+	}
+	spawnpointCache.Set(id, spawnpoint, ttlcache.DefaultTTL)
+}
+
 type gohbemLogger struct{}
 
 func (cl *gohbemLogger) Print(message string) {
