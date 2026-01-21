@@ -932,8 +932,10 @@ func ClearQuestsWithinGeofence(ctx context.Context, dbDetails db.DbDetails, geof
 		log.Errorf("ClearQuest: Error removing quests: %s", err)
 		return
 	}
-	ClearPokestopCache()
-	log.Infof("ClearQuest: Removed quests from %d pokestops in %s", rows, time.Since(started))
+	// DON'T clear L1 cache - let it naturally update as new quests arrive
+	// Clearing causes mass L1 misses during quest reset, overwhelming Redis
+	// ClearPokestopCache()
+	log.Infof("ClearQuest: Removed quests from %d pokestops in %s (L1 cache retained)", rows, time.Since(started))
 }
 
 func GetQuestStatusWithGeofence(dbDetails db.DbDetails, geofence *geojson.Feature) db.QuestStatus {
