@@ -750,6 +750,33 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 	inMemoryPokestop := getPokestopFromCache(pokestop.Id)
 	now := time.Now().Unix()
 
+	// Clear expired quests before saving to maintain cache/DB consistency
+	// This prevents stale expired quest data from persisting in L1/Redis/DB
+	if pokestop.QuestExpiry.Valid && pokestop.QuestExpiry.Int64 < now {
+		expiredAgo := now - pokestop.QuestExpiry.Int64
+		log.Debugf("Cleared expired quests for pokestop %s (expiry: %d, %ds ago)", pokestop.Id, pokestop.QuestExpiry.Int64, expiredAgo)
+
+		// Clear main quest
+		pokestop.QuestType = null.Int{}
+		pokestop.QuestTimestamp = null.Int{}
+		pokestop.QuestTarget = null.Int{}
+		pokestop.QuestConditions = null.String{}
+		pokestop.QuestRewards = null.String{}
+		pokestop.QuestTemplate = null.String{}
+		pokestop.QuestTitle = null.String{}
+		pokestop.QuestExpiry = null.Int{}
+
+		// Clear alternative quest (same expiry)
+		pokestop.AlternativeQuestType = null.Int{}
+		pokestop.AlternativeQuestTimestamp = null.Int{}
+		pokestop.AlternativeQuestTarget = null.Int{}
+		pokestop.AlternativeQuestConditions = null.String{}
+		pokestop.AlternativeQuestRewards = null.String{}
+		pokestop.AlternativeQuestTemplate = null.String{}
+		pokestop.AlternativeQuestTitle = null.String{}
+		pokestop.AlternativeQuestExpiry = null.Int{}
+	}
+
 	if inMemoryPokestop != nil {
 		val := inMemoryPokestop.Value()
 		oldPokestop = &val
