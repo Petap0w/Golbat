@@ -535,6 +535,7 @@ func loadSpawnpointsFromDB(ctx context.Context, dbConn *sqlx.DB, setter Persiste
 		Updated    int64    `db:"updated"`
 		LastSeen   int64    `db:"last_seen"`
 		DespawnSec null.Int `db:"despawn_sec"`
+		FirstSeen  int64    `db:"first_seen"` // Added in migration 6
 	}
 
 	// Load hot spawnpoints (configurable max age)

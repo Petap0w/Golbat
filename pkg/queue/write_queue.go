@@ -37,35 +37,13 @@ type WriteOperation struct {
 }
 
 type WriteQueue struct {
-	client     *redis.Client
-	buffer     chan *queuedWrite
-	bufferSize int
-}
-
-type queuedWrite struct {
-	stream  string
-	opBytes []byte
-	retries int
+	client *redis.Client
 }
 
 func NewWriteQueue(client *redis.Client) *WriteQueue {
-	bufferSize := 10000 // 500K in-memory buffer (5 seconds at 100K/sec)
-
-	q := &WriteQueue{
-		client:     client,
-		buffer:     make(chan *queuedWrite, bufferSize),
-		bufferSize: bufferSize,
+	return &WriteQueue{
+		client: client,
 	}
-
-	// Start background workers to drain buffer
-	workerCount := 20 // 20 parallel workers (increased for higher throughput)
-	for i := 0; i < workerCount; i++ {
-		go q.bufferWorker(i)
-	}
-
-	log.Infof("Write queue initialized with %d buffer size, %d workers", bufferSize, workerCount)
-
-	return q
 }
 
 func (q *WriteQueue) QueueWrite(ctx context.Context, writeType string, operation string, data interface{}) error {
@@ -89,40 +67,19 @@ func (q *WriteQueue) QueueWrite(ctx context.Context, writeType string, operation
 
 	stream := q.getStreamForType(writeType)
 
-	// Push to in-memory buffer (non-blocking) - FAST PATH!
-	write := &queuedWrite{
-		stream:  stream,
-		opBytes: opBytes,
-		retries: 0,
+	// Add to stream (no MAXLEN - workers handle cleanup)
+	err = q.client.XAdd(ctx, &redis.XAddArgs{
+		Stream: stream,
+		Values: map[string]interface{}{
+			"data": opBytes,
+		},
+	}).Err()
+
+	if err != nil {
+		return fmt.Errorf("failed to add to stream: %w", err)
 	}
 
-	select {
-	case q.buffer <- write:
-		// Successfully queued in memory - return immediately (microseconds)
-		return nil
-	default:
-		// Buffer full - TEST: Just log with same context to see if it's already expired
-		log.Warnf("Write buffer full (%d items), testing context validity...", q.bufferSize)
-
-		// TEST: Check if context is still valid
-		select {
-		case <-ctx.Done():
-			// Context already expired BEFORE we even tried Redis!
-			err := ctx.Err()
-			log.Errorf("DEBUG: Context already expired on buffer overflow! Error: %v, Type: %s", err, writeType)
-			return fmt.Errorf("context already expired (not Redis): %w", err)
-		default:
-			// Context is still valid
-			log.Infof("DEBUG: Context is VALID on buffer overflow for %s - would succeed if we tried Redis", writeType)
-
-			// TEMPORARILY DISABLED: Direct Redis XADD
-			// err = q.client.XAdd(ctx, &redis.XAddArgs{...}).Err()
-
-			// For now, just drop the write and log
-			log.Warnf("DEBUG: Dropping write for %s (Redis XADD disabled for testing)", writeType)
-			return nil
-		}
-	}
+	return nil
 }
 
 func (q *WriteQueue) getStreamForType(writeType string) string {
@@ -161,52 +118,7 @@ func (q *WriteQueue) GetQueueSizes(ctx context.Context) (map[string]int64, error
 	return sizes, nil
 }
 
-// bufferWorker drains the in-memory buffer and sends to Redis
-func (q *WriteQueue) bufferWorker(id int) {
-	log.Debugf("Buffer worker %d started", id)
-
-	// Use a persistent background context for all Redis operations in this worker
-	// This avoids creating/destroying contexts repeatedly and prevents nil context issues
-	ctx := context.Background()
-
-	for write := range q.buffer {
-		// Use Redis client's configured timeouts (20s WriteTimeout)
-		// No need to create a new context with timeout for each operation
-		err := q.client.XAdd(ctx, &redis.XAddArgs{
-			Stream: write.stream,
-			Values: map[string]interface{}{
-				"data": write.opBytes,
-			},
-		}).Err()
-
-		if err != nil {
-			// Retry up to 3 times with exponential backoff
-			write.retries++
-			if write.retries < 3 {
-				// Requeue for retry
-				select {
-				case q.buffer <- write:
-					log.Debugf("Requeued write (retry %d/3)", write.retries)
-				default:
-					log.Errorf("Failed to requeue write after Redis error: %v", err)
-				}
-			} else {
-				log.Errorf("Dropped write after 3 retries to %s: %v", write.stream, err)
-			}
-		}
-	}
-
-	log.Warnf("Buffer worker %d stopped (channel closed)", id)
-}
-
 func (q *WriteQueue) Flush(ctx context.Context) error {
-	// Drain in-memory buffer first
-	log.Infof("Flushing write buffer (%d items)...", len(q.buffer))
-	for len(q.buffer) > 0 {
-		time.Sleep(100 * time.Millisecond)
-	}
-	log.Info("Write buffer drained")
-
 	// Create a new context with timeout for flush operation
 	// Don't use the parent context which might already be canceled
 	flushCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
