@@ -188,7 +188,7 @@ func loadPersistentCacheFromDatabase(
 	routeCount := loadRoutesFromDB(ctx, dbConn, setter)
 	log.Infof("Loaded %d routes", routeCount)
 
-	log.Info("Loading hot spawnpoints from database (last 7 days)...")
+	log.Info("Loading spawnpoints from database...")
 	spawnpointCount := loadSpawnpointsFromDB(ctx, dbConn, setter)
 	log.Infof("Loaded %d spawnpoints", spawnpointCount)
 
@@ -527,7 +527,6 @@ func loadRoutesFromDB(ctx context.Context, dbConn *sqlx.DB, setter PersistentCac
 }
 
 // loadSpawnpointsFromDB streams hot spawnpoints (last 7 days) from DB into L1 cache
-// Uses custom query with WHERE clause to only load hot spawnpoints
 func loadSpawnpointsFromDB(ctx context.Context, dbConn *sqlx.DB, setter PersistentCacheSetter) int64 {
 	type Spawnpoint struct {
 		Id         int64    `db:"id"`
@@ -538,63 +537,27 @@ func loadSpawnpointsFromDB(ctx context.Context, dbConn *sqlx.DB, setter Persiste
 		DespawnSec null.Int `db:"despawn_sec"`
 	}
 
-	// Load hot spawnpoints (configurable max age) - reduces dataset significantly
+	// Load hot spawnpoints (configurable max age)
 	cfg := config.Config.Redis.PersistentCacheConfig
 	maxAgeDays := cfg.GetMaxAgeDays("spawnpoint")
-	query := fmt.Sprintf(`
-		SELECT id, lat, lon, updated, last_seen, despawn_sec 
-		FROM spawnpoint 
-		WHERE last_seen > UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL %d DAY))
-		ORDER BY id
-	`, maxAgeDays)
+	cutoffTime := time.Now().Unix() - int64(maxAgeDays*86400)
+	whereClause := fmt.Sprintf("last_seen > %d ORDER BY id", cutoffTime)
 
-	rows, err := dbConn.QueryxContext(ctx, query)
-	if err != nil {
-		log.Errorf("Failed to query hot spawnpoints: %v", err)
-		return 0
-	}
-	defer rows.Close()
-
-	var count, errorCount int64
-	lastLog := time.Now()
-	start := time.Now()
-
-	for rows.Next() {
-		var sp Spawnpoint
-		if err := rows.StructScan(&sp); err != nil {
-			errorCount++
-			if errorCount <= 10 {
-				log.Errorf("Failed to scan spawnpoint row #%d: %v", count+errorCount, err)
+	return streamTableToCacheDirect(ctx, dbConn, "spawnpoint", whereClause,
+		func(rows *sqlx.Rows) error {
+			var sp Spawnpoint
+			if err := rows.StructScan(&sp); err != nil {
+				return err
 			}
-			continue
-		}
 
-		jsonData, err := json.Marshal(sp)
-		if err != nil {
-			continue
-		}
+			jsonData, err := json.Marshal(sp)
+			if err != nil {
+				return err
+			}
 
-		// Convert int64 ID to string for setter
-		if err := setter.SetSpawnpoint(fmt.Sprintf("%d", sp.Id), jsonData); err != nil {
-			log.Debugf("Failed to set spawnpoint %d: %v", sp.Id, err)
-			continue
-		}
-
-		count++
-
-		// Progress logging every 10 seconds
-		if time.Since(lastLog) > 10*time.Second {
-			elapsed := time.Since(start)
-			log.Infof("Loading spawnpoint: %d loaded (%.1f/sec)...", count, float64(count)/elapsed.Seconds())
-			lastLog = time.Now()
-		}
-	}
-
-	if errorCount > 0 {
-		log.Warnf("Loaded spawnpoints with %d errors (skipped %d rows)", errorCount, errorCount)
-	}
-
-	return count
+			// Convert int64 ID to string for setter
+			return setter.SetSpawnpoint(fmt.Sprintf("%d", sp.Id), jsonData)
+		})
 }
 
 // UpdatePersistentCacheAsync updates Redis fort cache asynchronously

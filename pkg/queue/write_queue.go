@@ -49,7 +49,7 @@ type queuedWrite struct {
 }
 
 func NewWriteQueue(client *redis.Client) *WriteQueue {
-	bufferSize := 500000 // 500K in-memory buffer (5 seconds at 100K/sec)
+	bufferSize := 10000 // 500K in-memory buffer (5 seconds at 100K/sec)
 
 	q := &WriteQueue{
 		client:     client,
@@ -101,21 +101,27 @@ func (q *WriteQueue) QueueWrite(ctx context.Context, writeType string, operation
 		// Successfully queued in memory - return immediately (microseconds)
 		return nil
 	default:
-		// Buffer full - fall back to direct XADD (will block, but rare)
-		log.Warnf("Write buffer full (%d items), falling back to direct Redis XADD", q.bufferSize)
+		// Buffer full - TEST: Just log with same context to see if it's already expired
+		log.Warnf("Write buffer full (%d items), testing context validity...", q.bufferSize)
 
-		err = q.client.XAdd(ctx, &redis.XAddArgs{
-			Stream: stream,
-			Values: map[string]interface{}{
-				"data": opBytes,
-			},
-		}).Err()
+		// TEST: Check if context is still valid
+		select {
+		case <-ctx.Done():
+			// Context already expired BEFORE we even tried Redis!
+			err := ctx.Err()
+			log.Errorf("DEBUG: Context already expired on buffer overflow! Error: %v, Type: %s", err, writeType)
+			return fmt.Errorf("context already expired (not Redis): %w", err)
+		default:
+			// Context is still valid
+			log.Infof("DEBUG: Context is VALID on buffer overflow for %s - would succeed if we tried Redis", writeType)
 
-		if err != nil {
-			return fmt.Errorf("failed to add to stream: %w", err)
+			// TEMPORARILY DISABLED: Direct Redis XADD
+			// err = q.client.XAdd(ctx, &redis.XAddArgs{...}).Err()
+
+			// For now, just drop the write and log
+			log.Warnf("DEBUG: Dropping write for %s (Redis XADD disabled for testing)", writeType)
+			return nil
 		}
-
-		return nil
 	}
 }
 
