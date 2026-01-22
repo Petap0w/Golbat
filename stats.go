@@ -4,7 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"golbat/config"
-	"golbat/decoder"
+
+	//	"golbat/decoder"
 	"golbat/pkg/redis"
 	"time"
 
@@ -24,8 +25,8 @@ func StartDbUsageStatsLogger(db *sqlx.DB, redisClient *redis.Client) {
 			// Log Redis pool stats if Redis is enabled
 			if redisClient != nil {
 				poolStats := redisClient.PoolStats()
-				log.Infof("Redis - Hits: %d Misses: %d Timeouts: %d TotalConns: %d IdleConns: %d StaleConns: %d", 
-					poolStats.Hits, poolStats.Misses, poolStats.Timeouts, 
+				log.Infof("Redis - Hits: %d Misses: %d Timeouts: %d TotalConns: %d IdleConns: %d StaleConns: %d",
+					poolStats.Hits, poolStats.Misses, poolStats.Timeouts,
 					poolStats.TotalConns, poolStats.IdleConns, poolStats.StaleConns)
 			}
 		}
@@ -251,9 +252,9 @@ func StartQuestExpiry(db *sqlx.DB) {
 			} else {
 				rows, _ := result.RowsAffected()
 				totalRows += rows
-				if rows > 0 {
-					decoder.ClearPokestopCache()
-				}
+				//				if rows > 0 {
+				//					decoder.ClearPokestopCache()
+				//				}
 			}
 
 			result, err = db.Exec("UPDATE pokestop " +
@@ -272,9 +273,9 @@ func StartQuestExpiry(db *sqlx.DB) {
 			} else {
 				rows, _ := result.RowsAffected()
 				totalRows += rows
-				if rows > 0 {
-					decoder.ClearPokestopCache()
-				}
+				//				if rows > 0 {
+				//					decoder.ClearPokestopCache()
+				//				}
 			}
 
 			elapsed := time.Since(start)
