@@ -129,6 +129,8 @@ type redis struct {
 	StreamTrimTarget        int64                 `koanf:"stream_trim_target"` // Target size to trim streams to (e.g., 100000)
 	WriterBatchSize         int                   `koanf:"writer_batch_size"`
 	WriterWorkers           int                   `koanf:"writer_workers"`
+	PipelineBatchSize       int                   `koanf:"pipeline_batch_size"`        // Flush pipeline every N writes (default: 500)
+	PipelineFlushMs         int                   `koanf:"pipeline_flush_ms"`          // Flush pipeline every N milliseconds (default: 25)
 	PersistentCacheEnabled  bool                  `koanf:"persistent_cache_enabled"`   // Enable 24h Redis persistent cache + startup loading for all static objects
 	PersistentCacheTTLHours int                   `koanf:"persistent_cache_ttl_hours"` // How long to keep data in Redis persistent cache (default: 24)
 	PersistentCacheConfig   persistentCacheConfig `koanf:"persistent_cache"`           // Persistent cache age filters and trimming

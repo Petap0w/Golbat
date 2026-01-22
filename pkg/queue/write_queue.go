@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -36,14 +37,49 @@ type WriteOperation struct {
 	Timestamp int64  `msgpack:"timestamp"`
 }
 
-type WriteQueue struct {
-	client *redis.Client
+// writeOp represents a single write operation queued for pipelining
+type writeOp struct {
+	stream  string
+	opBytes []byte
 }
 
-func NewWriteQueue(client *redis.Client) *WriteQueue {
-	return &WriteQueue{
-		client: client,
+type WriteQueue struct {
+	client         *redis.Client
+	batchBuffer    []writeOp
+	batchMutex     sync.Mutex
+	batchSize      int
+	flushInterval  time.Duration
+	flushTicker    *time.Ticker
+	stopChan       chan struct{}
+	flushesTotal   int64 // Metrics: total flushes
+	writesTotal    int64 // Metrics: total writes queued
+	lastMetricsLog time.Time
+}
+
+func NewWriteQueue(client *redis.Client, batchSize int, flushMs int) *WriteQueue {
+	// Default values if not specified
+	if batchSize <= 0 {
+		batchSize = 500 // Default: flush every 500 writes
 	}
+	if flushMs <= 0 {
+		flushMs = 25 // Default: flush every 25ms
+	}
+
+	q := &WriteQueue{
+		client:         client,
+		batchBuffer:    make([]writeOp, 0, batchSize),
+		batchSize:      batchSize,
+		flushInterval:  time.Duration(flushMs) * time.Millisecond,
+		stopChan:       make(chan struct{}),
+		lastMetricsLog: time.Now(),
+	}
+
+	// Start periodic flush ticker
+	q.startPeriodicFlush()
+
+	log.Infof("Redis pipeline initialized: batch_size=%d, flush_interval=%dms", batchSize, flushMs)
+
+	return q
 }
 
 func (q *WriteQueue) QueueWrite(ctx context.Context, writeType string, operation string, data interface{}) error {
@@ -67,16 +103,19 @@ func (q *WriteQueue) QueueWrite(ctx context.Context, writeType string, operation
 
 	stream := q.getStreamForType(writeType)
 
-	// Add to stream (no MAXLEN - workers handle cleanup)
-	err = q.client.XAdd(ctx, &redis.XAddArgs{
-		Stream: stream,
-		Values: map[string]interface{}{
-			"data": opBytes,
-		},
-	}).Err()
+	// Add to batch buffer
+	q.batchMutex.Lock()
+	q.batchBuffer = append(q.batchBuffer, writeOp{
+		stream:  stream,
+		opBytes: opBytes,
+	})
+	q.writesTotal++
+	shouldFlush := len(q.batchBuffer) >= q.batchSize
+	q.batchMutex.Unlock()
 
-	if err != nil {
-		return fmt.Errorf("failed to add to stream: %w", err)
+	// Flush if batch is full (size-based flush)
+	if shouldFlush {
+		return q.flushBatch(ctx)
 	}
 
 	return nil
@@ -91,6 +130,84 @@ func (q *WriteQueue) getStreamForType(writeType string) string {
 	default:
 		return StreamNormal
 	}
+}
+
+// flushBatch sends all queued writes to Redis in a single pipeline
+func (q *WriteQueue) flushBatch(ctx context.Context) error {
+	q.batchMutex.Lock()
+	if len(q.batchBuffer) == 0 {
+		q.batchMutex.Unlock()
+		return nil
+	}
+
+	// Take ownership of current batch and reset buffer
+	batch := q.batchBuffer
+	q.batchBuffer = make([]writeOp, 0, q.batchSize)
+	q.flushesTotal++
+	q.batchMutex.Unlock()
+
+	// Create pipeline and add all writes
+	pipe := q.client.Pipeline()
+	for _, write := range batch {
+		pipe.XAdd(ctx, &redis.XAddArgs{
+			Stream: write.stream,
+			Values: map[string]interface{}{
+				"data": write.opBytes,
+			},
+		})
+	}
+
+	// Execute pipeline (single network round trip for all writes!)
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		log.Errorf("Pipeline flush failed for %d writes: %v", len(batch), err)
+		return fmt.Errorf("pipeline flush failed: %w", err)
+	}
+
+	// Log metrics every 30 seconds
+	if time.Since(q.lastMetricsLog) > 30*time.Second {
+		q.batchMutex.Lock()
+		avgBatchSize := float64(q.writesTotal) / float64(q.flushesTotal)
+		log.Infof("Redis pipeline metrics: %d writes, %d flushes, avg %.1f writes/flush",
+			q.writesTotal, q.flushesTotal, avgBatchSize)
+		q.lastMetricsLog = time.Now()
+		q.batchMutex.Unlock()
+	}
+
+	return nil
+}
+
+// startPeriodicFlush starts a background ticker that flushes the batch periodically
+func (q *WriteQueue) startPeriodicFlush() {
+	q.flushTicker = time.NewTicker(q.flushInterval)
+	go func() {
+		for {
+			select {
+			case <-q.flushTicker.C:
+				// Time-based flush (ensures max latency = flushInterval)
+				if err := q.flushBatch(context.Background()); err != nil {
+					log.Debugf("Periodic flush error: %v", err)
+				}
+			case <-q.stopChan:
+				q.flushTicker.Stop()
+				return
+			}
+		}
+	}()
+}
+
+// Stop stops the periodic flush ticker and flushes remaining writes
+func (q *WriteQueue) Stop(ctx context.Context) error {
+	log.Info("Stopping Redis pipeline...")
+	close(q.stopChan)
+
+	// Final flush of any remaining writes
+	if err := q.flushBatch(ctx); err != nil {
+		return err
+	}
+
+	log.Infof("Redis pipeline stopped. Final stats: %d writes, %d flushes", q.writesTotal, q.flushesTotal)
+	return nil
 }
 
 func (q *WriteQueue) GetQueueSizes(ctx context.Context) (map[string]int64, error) {

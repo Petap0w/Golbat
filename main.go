@@ -150,9 +150,13 @@ func main() {
 			log.Fatalf("Failed to connect to Redis: %s", err)
 		}
 
-		// Initialize write queue
-		writeQueue = queue.NewWriteQueue(redisClient.GetClient())
-		log.Info("Write queue initialized")
+		// Initialize write queue with pipelining
+		writeQueue = queue.NewWriteQueue(
+			redisClient.GetClient(),
+			cfg.Redis.PipelineBatchSize,
+			cfg.Redis.PipelineFlushMs,
+		)
+		log.Info("Write queue initialized with pipelining")
 
 		// Pre-warm Redis connection pool to handle startup burst
 		log.Infof("Pre-warming Redis connection pool (%d connections)...", cfg.Redis.PoolSize)
@@ -461,10 +465,15 @@ func main() {
 	log.Info("http server is shutdown, waiting for other go routines to exit...")
 	wg.Wait()
 
-	// No need to flush Redis write queue - data is already persisted in Redis
-	// The writers will continue processing independently
+	// Stop pipeline and flush any remaining buffered writes
 	if writeQueue != nil {
-		log.Info("All queued writes are in Redis, writers will handle them")
+		flushCtx, flushCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer flushCancel()
+
+		if err := writeQueue.Stop(flushCtx); err != nil {
+			log.Warnf("Failed to stop write queue cleanly: %s", err)
+		}
+		log.Info("All queued writes flushed to Redis, writers will handle them")
 	}
 
 	// Close Redis connection
