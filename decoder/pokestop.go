@@ -111,6 +111,7 @@ func GetPokestopRecord(ctx context.Context, db db.DbDetails, fortId string) (*Po
 	stop := getPokestopFromCache(fortId)
 	if stop != nil {
 		pokestop := stop.Value()
+		fortRtreeUpdatePokestopOnGet(&pokestop)
 		return &pokestop, nil
 	}
 
@@ -124,6 +125,7 @@ func GetPokestopRecord(ctx context.Context, db db.DbDetails, fortId string) (*Po
 
 		// Populate L1 cache
 		setPokestopCache(fortId, pokestop, ttlcache.DefaultTTL)
+		fortRtreeUpdatePokestopOnGet(&pokestop)
 		return &pokestop, nil
 	}
 
@@ -794,6 +796,9 @@ func savePokestopRecord(ctx context.Context, db db.DbDetails, pokestop *Pokestop
 
 	// Update L1 cache immediately for read consistency
 	setPokestopCache(pokestop.Id, *pokestop, ttlcache.DefaultTTL)
+	
+	// Update fort R-Tree for efficient geofence queries
+	fortRtreeUpdatePokestopOnGet(pokestop)
 
 	// Update Redis fort cache (async, non-blocking) for fast restart + quest preservation
 	if redisEnabled {
@@ -977,15 +982,20 @@ func UpdatePokestopWithQuest(ctx context.Context, db db.DbDetails, quest *pogo.F
 
 func ClearQuestsWithinGeofence(ctx context.Context, dbDetails db.DbDetails, geofence *geojson.Feature) {
 	started := time.Now()
+	
+	// Clear from database
 	rows, err := db.RemoveQuests(ctx, dbDetails, geofence)
 	if err != nil {
-		log.Errorf("ClearQuest: Error removing quests: %s", err)
+		log.Errorf("ClearQuest: Error removing quests from database: %s", err)
 		return
 	}
-	// DON'T clear L1 cache - let it naturally update as new quests arrive
-	// Clearing causes mass L1 misses during quest reset, overwhelming Redis
-	// ClearPokestopCache()
-	log.Infof("ClearQuest: Removed quests from %d pokestops in %s (L1 cache retained)", rows, time.Since(started))
+	
+	// Clear quest fields from L1 cache using R-Tree for efficient geofence query
+	// Redis persistent cache will be lazy-updated on next save
+	clearedL1 := ClearPokestopQuestsInGeofence(geofence)
+	
+	log.Infof("ClearQuest: Removed quests from %d pokestops in DB, cleared %d from L1 cache in %s", 
+		rows, clearedL1, time.Since(started))
 }
 
 func GetQuestStatusWithGeofence(dbDetails db.DbDetails, geofence *geojson.Feature) db.QuestStatus {

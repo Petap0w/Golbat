@@ -119,6 +119,7 @@ func GetGymRecord(ctx context.Context, db db.DbDetails, fortId string) (*Gym, er
 	inMemoryGym := getGymFromCache(fortId)
 	if inMemoryGym != nil {
 		gym := inMemoryGym.Value()
+		fortRtreeUpdateGymOnGet(&gym)
 		return &gym, nil
 	}
 
@@ -132,6 +133,7 @@ func GetGymRecord(ctx context.Context, db db.DbDetails, fortId string) (*Gym, er
 
 		// Populate L1 cache
 		setGymCache(fortId, gym, ttlcache.DefaultTTL)
+		fortRtreeUpdateGymOnGet(&gym)
 		return &gym, nil
 	}
 
@@ -657,13 +659,14 @@ func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
 			// Force update after configured interval (default: 15 min)
 			forceUpdateInterval := config.Config.Tuning.GetForceUpdateInterval("gym")
 			if oldGym.Updated > now-forceUpdateInterval {
-				// Unchanged and recently updated
-				if hasInternalChangesGym(oldGym, gym) {
-					areas := MatchStatsGeofence(gym.Lat, gym.Lon)
-					createGymWebhooks(oldGym, gym, areas)
-					setGymCache(gym.Id, *gym, ttlcache.DefaultTTL)
-				}
-				return
+			// Unchanged and recently updated
+			if hasInternalChangesGym(oldGym, gym) {
+				areas := MatchStatsGeofence(gym.Lat, gym.Lon)
+				createGymWebhooks(oldGym, gym, areas)
+				setGymCache(gym.Id, *gym, ttlcache.DefaultTTL)
+				fortRtreeUpdateGymOnGet(gym)
+			}
+			return
 			}
 		}
 	}
@@ -672,6 +675,9 @@ func saveGymRecord(ctx context.Context, db db.DbDetails, gym *Gym) {
 
 	// Update L1 cache immediately for read consistency
 	setGymCache(gym.Id, *gym, ttlcache.DefaultTTL)
+	
+	// Update fort R-Tree for efficient geofence queries
+	fortRtreeUpdateGymOnGet(gym)
 
 	// Update Redis fort cache (async, non-blocking) for fast restart + data preservation
 	if redisEnabled {
