@@ -716,6 +716,98 @@ func SearchGyms(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
+// POST /api/pokestop/v2/scan
+// DNF (Disjunctive Normal Form) filter system: OR logic between filter groups, AND logic within each group
+// Similar to Pokemon Scan V2
+// Focuses on showcase filtering only (quest filtering will be added later)
+//
+//	{
+//	  "min": {"lat": 40.7, "lon": -74.0},    // required: bounding box minimum
+//	  "max": {"lat": 40.8, "lon": -73.9},    // required: bounding box maximum
+//	  "filters": [
+//	    {
+//	      // Filter Group 1: All conditions must match (AND)
+//	      "has_showcase": true,              // optional: filter by whether pokestop has an active showcase
+//	      "showcase_focus_type": "buddy"     // optional: filter by showcase focus type ("buddy", "pokemon", "type")
+//	    },
+//	    {
+//	      // Filter Group 2: All conditions must match (AND)
+//	      "showcase_pokemon_id": 926,        // optional: filter by showcase pokemon ID
+//	      "showcase_expiry_max": 3600        // optional: filter for showcases expiring in less than 3600 seconds (1 hour)
+//	    }
+//	    // Result: (has_showcase=true AND showcase_focus_type="buddy") OR (showcase_pokemon_id=926 AND showcase_expiry_max=3600)
+//	  ],
+//	  "limit": 100                          // optional, default 500, max 10000
+//	}
+//
+// Available showcase filter fields:
+//   - has_showcase: bool - whether pokestop has an active showcase
+//   - showcase_pokemon_id: int - showcase pokemon ID (can be NULL for buddy/type showcases)
+//   - showcase_pokemon_form_id: int - showcase pokemon form ID
+//   - showcase_pokemon_type_id: int - showcase pokemon type ID
+//   - showcase_focus_type: string - showcase focus type ("buddy", "pokemon", "type")
+//   - showcase_expiry_max: int64 - filter for showcases expiring in less than X seconds from now
+//   - showcase_rankings_max_entries: int - filter for showcases with maximum X total_entries
+func PokestopScan2(c *gin.Context) {
+	type payload struct {
+		Min     *geo.Location                  `json:"min"`
+		Max     *geo.Location                  `json:"max"`
+		Filters []decoder.ApiPokestopDnfFilter `json:"filters"`
+		Limit   *int                           `json:"limit"`
+	}
+
+	var p payload
+	if err := c.ShouldBindJSON(&p); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+		return
+	}
+
+	// Validate request
+	if p.Min == nil || p.Max == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "min and max geographic bounds are required"})
+		return
+	}
+
+	if len(p.Filters) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "filters array is required"})
+		return
+	}
+
+	// Validate geographic bounds
+	min := *p.Min
+	max := *p.Max
+	if min.Latitude < -90 || min.Latitude > 90 || max.Latitude < -90 || max.Latitude > 90 ||
+		min.Longitude < -180 || min.Longitude > 180 || max.Longitude < -180 || max.Longitude > 180 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "lat must be [-90,90], lon must be [-180,180]"})
+		return
+	}
+
+	var scan decoder.ApiPokestopScan2
+	scan.Min = min
+	scan.Max = max
+	scan.DnfFilters = p.Filters
+
+	// Set limit
+	scan.Limit = 500
+	if p.Limit != nil && *p.Limit > 0 {
+		scan.Limit = *p.Limit
+	}
+	if scan.Limit > 10000 {
+		scan.Limit = 10000
+	}
+
+	// Execute scan (uses fortTree and L1 cache, no DB query)
+	result, err := decoder.GetPokestopsInArea2(scan)
+
+	if err != nil {
+		log.Warnf("error scanning pokestops: %v", err)
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
 func GetTappable(c *gin.Context) {
 	id := c.Param("tappable_id")
 	tappableId, err := strconv.ParseUint(id, 10, 64)
