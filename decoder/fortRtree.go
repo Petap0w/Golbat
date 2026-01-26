@@ -97,25 +97,30 @@ func LoadAllGyms(details db.DbDetails) {
 }
 
 func fortRtreeUpdatePokestopOnGet(pokestop *Pokestop) {
-	fortTreeMutex.RLock()
+	fortTreeMutex.Lock()
 	_, inMap := fortLookupCache[pokestop.Id]
-	fortTreeMutex.RUnlock()
 	if !inMap {
-		addPokestopToTree(pokestop)
-		// assumes lat,lon unchanged since ejected from cache, so do not add to rtree
-		updatePokestopLookup(pokestop)
+		fortTree.Insert([2]float64{pokestop.Lon, pokestop.Lat}, [2]float64{pokestop.Lon, pokestop.Lat}, pokestop.Id)
+		fortLookupCache[pokestop.Id] = FortLookup{
+			IsGym: false,
+			Lure:  pokestop.LureId,
+		}
 	}
+	fortTreeMutex.Unlock()
 }
 
 func fortRtreeUpdateGymOnGet(gym *Gym) {
-	fortTreeMutex.RLock()
+	fortTreeMutex.Lock()
 	_, inMap := fortLookupCache[gym.Id]
-	fortTreeMutex.RUnlock()
 	if !inMap {
-		addGymToTree(gym)
-		// assumes lat,lon unchanged since ejected from cache, so do not add to rtree
-		updateGymLookup(gym)
+		fortTree.Insert([2]float64{gym.Lon, gym.Lat}, [2]float64{gym.Lon, gym.Lat}, gym.Id)
+		fortLookupCache[gym.Id] = FortLookup{
+			IsGym:         true,
+			RaidLevel:     int8(gym.RaidLevel.ValueOrZero()),
+			RaidPokemonId: int16(gym.RaidPokemonId.ValueOrZero()),
+		}
 	}
+	fortTreeMutex.Unlock()
 }
 
 func updatePokestopLookup(pokestop *Pokestop) {
@@ -162,8 +167,8 @@ func removePokestopFromTree(pokestop *Pokestop) {
 	beforeLen := fortTree.Len()
 	fortTree.Delete([2]float64{pokestop.Lon, pokestop.Lat}, [2]float64{pokestop.Lon, pokestop.Lat}, pokestop.Id)
 	afterLen := fortTree.Len()
-	fortTreeMutex.Unlock()
 	delete(fortLookupCache, pokestop.Id)
+	fortTreeMutex.Unlock()
 
 	if beforeLen != afterLen+1 {
 		log.Debugf("FortRtree - UNEXPECTED removing pokestop %s, lat %f lon %f size %d->%d",
@@ -176,8 +181,8 @@ func removeGymFromTree(gym *Gym) {
 	beforeLen := fortTree.Len()
 	fortTree.Delete([2]float64{gym.Lon, gym.Lat}, [2]float64{gym.Lon, gym.Lat}, gym.Id)
 	afterLen := fortTree.Len()
-	fortTreeMutex.Unlock()
 	delete(fortLookupCache, gym.Id)
+	fortTreeMutex.Unlock()
 
 	if beforeLen != afterLen+1 {
 		log.Debugf("FortRtree - UNEXPECTED removing gym %s, lat %f lon %f size %d->%d",
