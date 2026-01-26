@@ -750,8 +750,8 @@ func SearchGyms(c *gin.Context) {
 //   - showcase_rankings_max_entries: int - filter for showcases with maximum X total_entries
 func PokestopScan2(c *gin.Context) {
 	type payload struct {
-		Min     *geo.Location                  `json:"min"`
-		Max     *geo.Location                  `json:"max"`
+		Min     *geo.ApiLocation               `json:"min"`
+		Max     *geo.ApiLocation               `json:"max"`
 		Filters []decoder.ApiPokestopDnfFilter `json:"filters"`
 		Limit   *int                           `json:"limit"`
 	}
@@ -774,13 +774,17 @@ func PokestopScan2(c *gin.Context) {
 	}
 
 	// Validate geographic bounds
-	min := *p.Min
-	max := *p.Max
-	if min.Latitude < -90 || min.Latitude > 90 || max.Latitude < -90 || max.Latitude > 90 ||
-		min.Longitude < -180 || min.Longitude > 180 || max.Longitude < -180 || max.Longitude > 180 {
+	minApi := *p.Min
+	maxApi := *p.Max
+	if minApi.Latitude < -90 || minApi.Latitude > 90 || maxApi.Latitude < -90 || maxApi.Latitude > 90 ||
+		minApi.Longitude < -180 || minApi.Longitude > 180 || maxApi.Longitude < -180 || maxApi.Longitude > 180 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "lat must be [-90,90], lon must be [-180,180]"})
 		return
 	}
+
+	// Convert ApiLocation to Location
+	min := minApi.ToLocation()
+	max := maxApi.ToLocation()
 
 	var scan decoder.ApiPokestopScan2
 	scan.Min = min

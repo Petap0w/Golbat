@@ -142,7 +142,7 @@ func updateGymLookup(gym *Gym) {
 }
 
 func addPokestopToTree(pokestop *Pokestop) {
-	log.Infof("FortRtree - add pokestop %s, lat %f lon %f", pokestop.Id, pokestop.Lat, pokestop.Lon)
+	//	log.Infof("FortRtree - add pokestop %s, lat %f lon %f", pokestop.Id, pokestop.Lat, pokestop.Lon)
 
 	fortTreeMutex.Lock()
 	fortTree.Insert([2]float64{pokestop.Lon, pokestop.Lat}, [2]float64{pokestop.Lon, pokestop.Lat}, pokestop.Id)
@@ -150,7 +150,7 @@ func addPokestopToTree(pokestop *Pokestop) {
 }
 
 func addGymToTree(gym *Gym) {
-	log.Infof("FortRtree - add gym %s, lat %f lon %f", gym.Id, gym.Lat, gym.Lon)
+	//	log.Infof("FortRtree - add gym %s, lat %f lon %f", gym.Id, gym.Lat, gym.Lon)
 
 	fortTreeMutex.Lock()
 	fortTree.Insert([2]float64{gym.Lon, gym.Lat}, [2]float64{gym.Lon, gym.Lat}, gym.Id)
