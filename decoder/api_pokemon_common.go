@@ -2,6 +2,7 @@ package decoder
 
 import (
 	"math"
+	"sync"
 	"time"
 
 	"golbat/config"
@@ -11,6 +12,7 @@ import (
 	"github.com/UnownHash/gohbem"
 	"github.com/guregu/null/v6"
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/rtree"
 )
 
 type ApiPokemonDnfId struct {
@@ -180,7 +182,12 @@ type PokemonScanRetrieveParameters interface {
 	GetLimit() int
 }
 
-func internalGetPokemonInArea[F any](
+// internalGetPokemonInAreaFromTree is the core scan implementation, parameterised by tree and mutex
+// so it can serve both the main pokemon cache and the secondary notable cache.
+func internalGetPokemonInAreaFromTree[F any](
+	tree *rtree.RTreeG[uint64],
+	mu *sync.RWMutex,
+	label string,
 	retrieveParameters PokemonScanRetrieveParameters,
 	dnfFilters map[dnfFilterLookup][]F,
 	isPokemonDnfMatch func(pokemonLookup *PokemonLookup, pvpLookup *PokemonPvpLookup, filter *F) bool,
@@ -198,25 +205,24 @@ func internalGetPokemonInArea[F any](
 	pokemonExamined := 0
 	pokemonSkipped := 0
 
-	pokemonTreeMutex.RLock()
-	pokemonTree2 := pokemonTree.Copy()
-	pokemonTreeMutex.RUnlock()
+	mu.RLock()
+	treeCopy := tree.Copy()
+	mu.RUnlock()
 
 	lockedTime := time.Since(start)
-	totalPokemon := pokemonTree2.Len()
+	totalPokemon := treeCopy.Len()
 
 	var returnKeys []uint64
 
 	performScan := func() {
 		pokemonMatched := 0
-		pokemonTree2.Search([2]float64{minLocation.Longitude, minLocation.Latitude}, [2]float64{maxLocation.Longitude, maxLocation.Latitude},
+		treeCopy.Search([2]float64{minLocation.Longitude, minLocation.Latitude}, [2]float64{maxLocation.Longitude, maxLocation.Latitude},
 			func(min, max [2]float64, pokemonId uint64) bool {
 				pokemonExamined++
 
 				pokemonLookupItem, found := pokemonLookupCache.Load(pokemonId)
 				if !found {
 					pokemonSkipped++
-					// Did not find cached result, something amiss?
 					return true
 				}
 
@@ -256,18 +262,32 @@ func internalGetPokemonInArea[F any](
 					returnKeys = append(returnKeys, pokemonId)
 					pokemonMatched++
 					if pokemonMatched > maxPokemon {
-						log.Infof("GetPokemonInArea - result would exceed maximum size (%d), stopping scan", maxPokemon)
+						log.Infof("%s - result would exceed maximum size (%d), stopping scan", label, maxPokemon)
 						return false
 					}
 				}
 
-				return true // always continue
+				return true
 			})
-
 	}
 
 	performScan()
-	log.Infof("GetPokemonInArea - scan time %s (locked time %s), %d scanned, %d skipped, %d returned", time.Since(start), lockedTime, pokemonExamined, pokemonSkipped, len(returnKeys))
+	log.Infof("%s - scan time %s (locked time %s), %d scanned, %d skipped, %d returned", label, time.Since(start), lockedTime, pokemonExamined, pokemonSkipped, len(returnKeys))
 
 	return returnKeys, pokemonExamined, pokemonSkipped, totalPokemon
+}
+
+func internalGetPokemonInArea[F any](
+	retrieveParameters PokemonScanRetrieveParameters,
+	dnfFilters map[dnfFilterLookup][]F,
+	isPokemonDnfMatch func(pokemonLookup *PokemonLookup, pvpLookup *PokemonPvpLookup, filter *F) bool,
+) ([]uint64, int, int, int) {
+	return internalGetPokemonInAreaFromTree(
+		&pokemonTree,
+		&pokemonTreeMutex,
+		"GetPokemonInArea",
+		retrieveParameters,
+		dnfFilters,
+		isPokemonDnfMatch,
+	)
 }

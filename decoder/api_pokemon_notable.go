@@ -1,0 +1,87 @@
+package decoder
+
+import (
+	"time"
+
+	log "github.com/sirupsen/logrus"
+)
+
+// GetNotablePokemonInArea searches only the notable secondary cache (hundos, nundos, XXS, XXL)
+// using the same ApiPokemonScan2 request format as /api/pokemon/v2/scan.
+// This is orders of magnitude faster than a global v2/scan because the notable tree is a tiny
+// subset of the full pokemon cache.
+func GetNotablePokemonInArea(retrieveParameters ApiPokemonScan2) []*ApiPokemonResult {
+	dnfFilters := make(map[dnfFilterLookup][]ApiPokemonDnfFilter)
+
+	for _, filter := range retrieveParameters.DnfFilters {
+		if len(filter.Pokemon) > 0 {
+			for _, keyString := range filter.Pokemon {
+				pokemonId := keyString.Pokemon
+				if pokemonId == 0 {
+					pokemonId = -1
+				}
+				var formId int16 = -1
+				if keyString.Form != nil {
+					formId = *keyString.Form
+				}
+				key := dnfFilterLookup{
+					pokemon: pokemonId,
+					form:    formId,
+				}
+				dnfFilters[key] = append(dnfFilters[key], filter)
+			}
+		} else {
+			key := dnfFilterLookup{pokemon: -1, form: -1}
+			dnfFilters[key] = append(dnfFilters[key], filter)
+		}
+	}
+
+	isPokemonDnfMatch := func(pokemonLookup *PokemonLookup, pvpLookup *PokemonPvpLookup, filter *ApiPokemonDnfFilter) bool {
+		if filter.Iv != nil && (pokemonLookup.Iv < filter.Iv.Min || pokemonLookup.Iv > filter.Iv.Max) ||
+			filter.StaIv != nil && (pokemonLookup.Sta < filter.StaIv.Min || pokemonLookup.Sta > filter.StaIv.Max) ||
+			filter.AtkIv != nil && (pokemonLookup.Atk < filter.AtkIv.Min || pokemonLookup.Atk > filter.AtkIv.Max) ||
+			filter.DefIv != nil && (pokemonLookup.Def < filter.DefIv.Min || pokemonLookup.Def > filter.DefIv.Max) ||
+			filter.Level != nil && (pokemonLookup.Level < filter.Level.Min || pokemonLookup.Level > filter.Level.Max) ||
+			filter.Cp != nil && (pokemonLookup.Cp < filter.Cp.Min || pokemonLookup.Cp > filter.Cp.Max) ||
+			filter.Gender != nil && (pokemonLookup.Gender < filter.Gender.Min || pokemonLookup.Gender > filter.Gender.Max) ||
+			filter.Size != nil && (pokemonLookup.Size < filter.Size.Min || pokemonLookup.Size > filter.Size.Max) {
+			return false
+		}
+
+		if filter.Little != nil && (pvpLookup == nil || pvpLookup.Little < filter.Little.Min || pvpLookup.Little > filter.Little.Max) ||
+			filter.Great != nil && (pvpLookup == nil || pvpLookup.Great < filter.Great.Min || pvpLookup.Great > filter.Great.Max) ||
+			filter.Ultra != nil && (pvpLookup == nil || pvpLookup.Ultra < filter.Ultra.Min || pvpLookup.Ultra > filter.Ultra.Max) {
+			return false
+		}
+		return true
+	}
+
+	returnKeys, _, _, _ := internalGetPokemonInAreaFromTree(
+		&notableTree,
+		&notableTreeMutex,
+		"GetNotablePokemonInArea",
+		retrieveParameters,
+		dnfFilters,
+		isPokemonDnfMatch,
+	)
+
+	results := make([]*ApiPokemonResult, 0, len(returnKeys))
+
+	start := time.Now()
+	startUnix := start.Unix()
+
+	for _, key := range returnKeys {
+		pokemon, unlock, _ := peekPokemonRecordReadOnly(key)
+		if pokemon != nil {
+			if pokemon.ExpireTimestamp.ValueOrZero() > startUnix {
+				apiPokemon := buildApiPokemonResult(pokemon)
+				results = append(results, &apiPokemon)
+			}
+			unlock()
+		}
+	}
+
+	log.Infof("GetNotablePokemonInArea - result buffer time %s, %d added", time.Since(start), len(results))
+
+	return results
+}
