@@ -96,9 +96,12 @@ func updatePokemonLookup(pokemon *Pokemon, changePvp bool, pvpResults map[string
 
 	pokemonLookupCacheItem, existed := pokemonLookupCache.Load(pokemonId)
 
+	// Save old lookup before overwriting so we can detect notable-status and position changes.
+	var oldLookup *PokemonLookup
 	// Track old form key so we can adjust counts
 	var oldKey pokemonFormKey
 	if existed && pokemonLookupCacheItem.PokemonLookup != nil {
+		oldLookup = pokemonLookupCacheItem.PokemonLookup
 		oldKey = pokemonFormKey{pokemonLookupCacheItem.PokemonLookup.PokemonId, pokemonLookupCacheItem.PokemonLookup.Form}
 	}
 
@@ -129,6 +132,22 @@ func updatePokemonLookup(pokemon *Pokemon, changePvp bool, pvpResults map[string
 	}
 
 	pokemonLookupCache.Store(pokemonId, pokemonLookupCacheItem)
+
+	// Sync notable secondary cache (hundos, nundos, XXS, XXL).
+	newLookup := pokemonLookupCacheItem.PokemonLookup
+	wasNotable := oldLookup != nil && isLookupNotable(oldLookup)
+	isNowNotable := isLookupNotable(newLookup)
+	switch {
+	case isNowNotable && !wasNotable:
+		addPokemonToNotableTree(pokemon)
+	case !isNowNotable && wasNotable:
+		removePokemonFromNotableTree(pokemonId, pokemon.Lat, pokemon.Lon)
+	case isNowNotable && wasNotable:
+		if pokemon.Lat != pokemon.oldValues.Lat || pokemon.Lon != pokemon.oldValues.Lon {
+			removePokemonFromNotableTree(pokemonId, pokemon.oldValues.Lat, pokemon.oldValues.Lon)
+			addPokemonToNotableTree(pokemon)
+		}
+	}
 
 	// Update form counts
 	newKey := pokemonFormKey{pokemonLookupCacheItem.PokemonLookup.PokemonId, pokemonLookupCacheItem.PokemonLookup.Form}
@@ -195,6 +214,9 @@ func removePokemonFromTree(pokemonId uint64, lat, lon float64) {
 	pokemonTreeMutex.Unlock()
 	if item, ok := pokemonLookupCache.LoadAndDelete(pokemonId); ok && item.PokemonLookup != nil {
 		adjustPokemonFormCount(pokemonFormKey{item.PokemonLookup.PokemonId, item.PokemonLookup.Form}, -1)
+		if isLookupNotable(item.PokemonLookup) {
+			removePokemonFromNotableTree(pokemonId, lat, lon)
+		}
 	}
 
 	if beforeLen != afterLen+1 {

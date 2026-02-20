@@ -393,6 +393,23 @@ func PokemonScan2(c *gin.Context) {
 	c.JSON(http.StatusAccepted, res)
 }
 
+func PokemonNotable(c *gin.Context) {
+	var requestBody decoder.ApiPokemonScan2
+
+	if err := c.BindJSON(&requestBody); err != nil {
+		log.Warnf("POST /api/pokemon/notable Error during post retrieve %v", err)
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+
+	res := decoder.GetNotablePokemonInArea(requestBody)
+	if res == nil {
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+	c.JSON(http.StatusAccepted, res)
+}
+
 func PokemonScan3(c *gin.Context) {
 	var requestBody decoder.ApiPokemonScan3
 
