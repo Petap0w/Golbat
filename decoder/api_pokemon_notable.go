@@ -3,6 +3,8 @@ package decoder
 import (
 	"time"
 
+	"golbat/config"
+
 	log "github.com/sirupsen/logrus"
 )
 
@@ -56,10 +58,16 @@ func GetNotablePokemonInArea(retrieveParameters ApiPokemonScan2) []*ApiPokemonRe
 		return true
 	}
 
+	notableMax := config.Config.Tuning.MaxNotablePokemonResults
+	if notableMax == 0 {
+		notableMax = config.Config.Tuning.MaxPokemonResults
+	}
+
 	returnKeys, _, _, _ := internalGetPokemonInAreaFromTree(
 		&notableTree,
 		&notableTreeMutex,
 		"GetNotablePokemonInArea",
+		notableMax,
 		retrieveParameters,
 		dnfFilters,
 		isPokemonDnfMatch,

@@ -188,6 +188,7 @@ func internalGetPokemonInAreaFromTree[F any](
 	tree *rtree.RTreeG[uint64],
 	mu *sync.RWMutex,
 	label string,
+	configMax int,
 	retrieveParameters PokemonScanRetrieveParameters,
 	dnfFilters map[dnfFilterLookup][]F,
 	isPokemonDnfMatch func(pokemonLookup *PokemonLookup, pvpLookup *PokemonPvpLookup, filter *F) bool,
@@ -197,7 +198,7 @@ func internalGetPokemonInAreaFromTree[F any](
 	minLocation := retrieveParameters.GetMin()
 	maxLocation := retrieveParameters.GetMax()
 
-	maxPokemon := config.Config.Tuning.MaxPokemonResults
+	maxPokemon := configMax
 	if retrieveParameters.GetLimit() > 0 && retrieveParameters.GetLimit() < maxPokemon {
 		maxPokemon = retrieveParameters.GetLimit()
 	}
@@ -286,6 +287,7 @@ func internalGetPokemonInArea[F any](
 		&pokemonTree,
 		&pokemonTreeMutex,
 		"GetPokemonInArea",
+		config.Config.Tuning.MaxPokemonResults,
 		retrieveParameters,
 		dnfFilters,
 		isPokemonDnfMatch,
