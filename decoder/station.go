@@ -48,6 +48,8 @@ type Station struct {
 
 	StationData // Embedded data fields - can be copied for write-behind queue
 
+	BattleSeed null.Int `db:"-" json:"-"` // Memory only, sent in webhook as string
+
 	dirty         bool     `db:"-" json:"-"` // Not persisted - tracks if object needs saving
 	newRecord     bool     `db:"-" json:"-"` // Not persisted - tracks if this is a new record
 	changedFields []string `db:"-" json:"-"` // Track which fields changed (only when dbDebugEnabled)
@@ -364,6 +366,15 @@ func (station *Station) SetStationedPokemon(v null.String) {
 		}
 		station.StationedPokemon = v
 		station.dirty = true
+	}
+}
+
+func (station *Station) SetBattleSeed(v null.Int) {
+	if station.BattleSeed != v {
+		if dbDebugEnabled {
+			station.changedFields = append(station.changedFields, fmt.Sprintf("BattleSeed:%s->%s", FormatNull(station.BattleSeed), FormatNull(v)))
+		}
+		station.BattleSeed = v
 	}
 }
 
