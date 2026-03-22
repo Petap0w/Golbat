@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/guregu/null/v6"
@@ -25,27 +26,28 @@ const stationSelectColumns = `id, lat, lon, name, cell_id, start_time, end_time,
 	stationed_pokemon`
 
 type StationWebhook struct {
-	Id                     string   `json:"id"`
-	Latitude               float64  `json:"latitude"`
-	Longitude              float64  `json:"longitude"`
-	Name                   string   `json:"name"`
-	StartTime              int64    `json:"start_time"`
-	EndTime                int64    `json:"end_time"`
-	IsBattleAvailable      bool     `json:"is_battle_available"`
-	BattleLevel            null.Int `json:"battle_level"`
-	BattleStart            null.Int `json:"battle_start"`
-	BattleEnd              null.Int `json:"battle_end"`
-	BattlePokemonId        null.Int `json:"battle_pokemon_id"`
-	BattlePokemonForm      null.Int `json:"battle_pokemon_form"`
-	BattlePokemonCostume   null.Int `json:"battle_pokemon_costume"`
-	BattlePokemonGender    null.Int `json:"battle_pokemon_gender"`
-	BattlePokemonAlignment null.Int `json:"battle_pokemon_alignment"`
-	BattlePokemonBreadMode null.Int `json:"battle_pokemon_bread_mode"`
-	BattlePokemonMove1     null.Int `json:"battle_pokemon_move_1"`
-	BattlePokemonMove2     null.Int `json:"battle_pokemon_move_2"`
-	TotalStationedPokemon  null.Int `json:"total_stationed_pokemon"`
-	TotalStationedGmax     null.Int `json:"total_stationed_gmax"`
-	Updated                int64    `json:"updated"`
+	Id                     string      `json:"id"`
+	Latitude               float64     `json:"latitude"`
+	Longitude              float64     `json:"longitude"`
+	Name                   string      `json:"name"`
+	StartTime              int64       `json:"start_time"`
+	EndTime                int64       `json:"end_time"`
+	IsBattleAvailable      bool        `json:"is_battle_available"`
+	BattleSeed             null.String `json:"battle_seed"`
+	BattleLevel            null.Int    `json:"battle_level"`
+	BattleStart            null.Int    `json:"battle_start"`
+	BattleEnd              null.Int    `json:"battle_end"`
+	BattlePokemonId        null.Int    `json:"battle_pokemon_id"`
+	BattlePokemonForm      null.Int    `json:"battle_pokemon_form"`
+	BattlePokemonCostume   null.Int    `json:"battle_pokemon_costume"`
+	BattlePokemonGender    null.Int    `json:"battle_pokemon_gender"`
+	BattlePokemonAlignment null.Int    `json:"battle_pokemon_alignment"`
+	BattlePokemonBreadMode null.Int    `json:"battle_pokemon_bread_mode"`
+	BattlePokemonMove1     null.Int    `json:"battle_pokemon_move_1"`
+	BattlePokemonMove2     null.Int    `json:"battle_pokemon_move_2"`
+	TotalStationedPokemon  null.Int    `json:"total_stationed_pokemon"`
+	TotalStationedGmax     null.Int    `json:"total_stationed_gmax"`
+	Updated                int64       `json:"updated"`
 }
 
 func loadStationFromDatabase(ctx context.Context, db db.DbDetails, stationId string, station *Station) error {
@@ -271,7 +273,13 @@ func createStationWebhooks(station *Station) {
 			StartTime:              station.StartTime,
 			EndTime:                station.EndTime,
 			IsBattleAvailable:      station.IsBattleAvailable,
-			BattleLevel:            station.BattleLevel,
+			BattleSeed: func() null.String {
+				if station.BattleSeed.Valid {
+					return null.StringFrom(strconv.FormatInt(station.BattleSeed.Int64, 10))
+				}
+				return null.String{}
+			}(),
+			BattleLevel: station.BattleLevel,
 			BattleStart:            station.BattleStart,
 			BattleEnd:              station.BattleEnd,
 			BattlePokemonId:        station.BattlePokemonId,

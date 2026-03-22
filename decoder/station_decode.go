@@ -30,6 +30,7 @@ func (station *Station) updateFromStationProto(stationProto *pogo.StationProto, 
 	station.SetCooldownComplete(stationProto.CooldownCompleteMs)
 	station.SetIsBattleAvailable(stationProto.IsBreadBattleAvailable)
 	if battleDetails := stationProto.BattleDetails; battleDetails != nil {
+		station.SetBattleSeed(null.IntFrom(battleDetails.BreadBattleSeed))
 		station.SetBattleLevel(null.IntFrom(int64(battleDetails.BattleLevel)))
 		station.SetBattleStart(null.IntFrom(battleDetails.BattleWindowStartMs / 1000))
 		station.SetBattleEnd(null.IntFrom(battleDetails.BattleWindowEndMs / 1000))
