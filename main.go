@@ -342,6 +342,7 @@ func main() {
 	apiGroup.GET("/reload-geojson", ReloadGeojson)
 
 	apiGroup.GET("/pokemon/id/:pokemon_id", PokemonOne)
+	apiGroup.POST("/pokemon/species/:pokedex_id/wipe", PokemonWipeSpecies)
 	apiGroup.GET("/pokemon/available", PokemonAvailable)
 	apiGroup.POST("/pokemon/scan", PokemonScan)
 	apiGroup.POST("/pokemon/v2/scan", PokemonScan2)

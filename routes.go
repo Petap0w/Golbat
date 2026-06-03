@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -441,6 +442,22 @@ func PokemonOne(c *gin.Context) {
 	} else {
 		c.Status(http.StatusNotFound)
 	}
+}
+
+func PokemonWipeSpecies(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("pokedex_id"), 10, 64)
+	if err != nil || id < 0 || id > math.MaxInt16 {
+		log.Warnf("POST /api/pokemon/species/:pokedex_id/wipe Invalid pokedex_id: %v", c.Param("pokedex_id"))
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	removed := decoder.WipePokemonSpecies(int16(id))
+
+	c.JSON(http.StatusOK, gin.H{
+		"pokedex_id": id,
+		"removed":    removed,
+	})
 }
 
 func PokemonAvailable(c *gin.Context) {
