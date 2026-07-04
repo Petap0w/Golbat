@@ -170,6 +170,7 @@ func initDataCache() {
 		DisableTouchOnHit: true, // Pokemon will last 60 mins from when we first see them not last see them
 	})
 	initPokemonRtree()
+	initNotableRtree()
 	initFortRtree()
 	initStationBattleCache()
 
