@@ -2,6 +2,8 @@ package decoder
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -408,6 +410,38 @@ func TestCreateStationWebhooksUsesTopBattleForFlatFields(t *testing.T) {
 	}
 	if payload.BattlePokemonId.ValueOrZero() != 527 || payload.BattleLevel.ValueOrZero() != 1 {
 		t.Fatalf("expected webhook flat fields from top battle, got %+v", payload)
+	}
+	if payload.BattleSeed.ValueOrZero() != "1" {
+		t.Fatalf("expected legacy battle_seed \"1\" from top battle, got %+v", payload.BattleSeed)
+	}
+}
+
+// TestStationWebhookLegacyBattleSeedWireFormat guards the legacy battle_seed
+// field kept for external consumers: a decimal string when a battle is present,
+// null when not (matching the pre-bread_battle_seed webhook format).
+func TestStationWebhookLegacyBattleSeedWireFormat(t *testing.T) {
+	now := time.Now().Unix()
+
+	var withBattle StationWebhook
+	applyTopStationBattleToStationWebhook(&withBattle, []StationBattleData{
+		testStationBattle("station-1", 8443669687878199535, 1, now-60, now+1800, 527),
+	})
+	marshalled, err := json.Marshal(withBattle)
+	if err != nil {
+		t.Fatalf("marshal webhook with battle: %v", err)
+	}
+	if !strings.Contains(string(marshalled), `"battle_seed":"8443669687878199535"`) {
+		t.Errorf("expected battle_seed as decimal string, got %s", marshalled)
+	}
+
+	var withoutBattle StationWebhook
+	applyTopStationBattleToStationWebhook(&withoutBattle, nil)
+	marshalled, err = json.Marshal(withoutBattle)
+	if err != nil {
+		t.Fatalf("marshal webhook without battle: %v", err)
+	}
+	if !strings.Contains(string(marshalled), `"battle_seed":null`) {
+		t.Errorf("expected battle_seed null without battle, got %s", marshalled)
 	}
 }
 

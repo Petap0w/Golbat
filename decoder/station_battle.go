@@ -7,6 +7,7 @@ import (
 	"hash/maphash"
 	"math"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/guregu/null/v6"
@@ -442,6 +443,7 @@ func applyTopStationBattleToStationWebhook(hook *StationWebhook, battles []Stati
 	if battle == nil {
 		return
 	}
+	hook.BattleSeed = null.StringFrom(strconv.FormatInt(battle.BreadBattleSeed, 10))
 	hook.BattlePokemonId = battle.BattlePokemonId
 	hook.BattlePokemonForm = battle.BattlePokemonForm
 	hook.BattlePokemonCostume = battle.BattlePokemonCostume

@@ -32,6 +32,10 @@ type StationWebhook struct {
 	StartTime              int64                  `json:"start_time"`
 	EndTime                int64                  `json:"end_time"`
 	IsBattleAvailable      bool                   `json:"is_battle_available"`
+	// BattleSeed is the top battle's bread_battle_seed as a decimal string
+	// (null when no battle). Legacy field kept for external consumers that
+	// predate bread_battle_seed; remove once they have migrated.
+	BattleSeed             null.String            `json:"battle_seed"`
 	BattleLevel            null.Int               `json:"battle_level"`
 	BattleStart            null.Int               `json:"battle_start"`
 	BattleEnd              null.Int               `json:"battle_end"`
