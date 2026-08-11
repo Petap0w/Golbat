@@ -199,6 +199,7 @@ func initDataCache() {
 		TouchOnHit: false,
 	})
 	initPokemonRtree()
+	initNotableRtree()
 	initFortRtree()
 	initStationBattleCache()
 

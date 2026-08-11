@@ -9,6 +9,7 @@ import (
 	pb "golbat/grpc"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/rtree"
 )
 
 type ApiPokemonDnfId struct {
@@ -68,12 +69,33 @@ func internalGetPokemonInArea[F any](
 	dnfFilters map[dnfFilterLookup][]F,
 	isPokemonDnfMatch func(pokemonLookup *PokemonLookup, pvpLookup *PokemonPvpLookup, filter *F) bool,
 ) ([]uint64, int, int, int) {
+	return internalGetPokemonInAreaFromTree(
+		getPokemonTreeSnapshot,
+		"GetPokemonInArea",
+		config.Config.Tuning.MaxPokemonResults,
+		retrieveParameters,
+		dnfFilters,
+		isPokemonDnfMatch,
+	)
+}
+
+// internalGetPokemonInAreaFromTree is the core scan implementation,
+// parameterised by snapshot source so it can serve both the main pokemon
+// tree and the notable secondary tree (fork addition — see notableRtree.go).
+func internalGetPokemonInAreaFromTree[F any](
+	getSnapshot func() *rtree.RTreeG[uint64],
+	label string,
+	configMax int,
+	retrieveParameters PokemonScanRetrieveParameters,
+	dnfFilters map[dnfFilterLookup][]F,
+	isPokemonDnfMatch func(pokemonLookup *PokemonLookup, pvpLookup *PokemonPvpLookup, filter *F) bool,
+) ([]uint64, int, int, int) {
 	start := time.Now()
 
 	minLocation := retrieveParameters.GetMin()
 	maxLocation := retrieveParameters.GetMax()
 
-	maxPokemon := config.Config.Tuning.MaxPokemonResults
+	maxPokemon := configMax
 	if retrieveParameters.GetLimit() > 0 && retrieveParameters.GetLimit() < maxPokemon {
 		maxPokemon = retrieveParameters.GetLimit()
 	}
@@ -81,7 +103,7 @@ func internalGetPokemonInArea[F any](
 	pokemonExamined := 0
 	pokemonSkipped := 0
 
-	pokemonTree2 := getPokemonTreeSnapshot()
+	pokemonTree2 := getSnapshot()
 
 	lockedTime := time.Since(start)
 	totalPokemon := pokemonTree2.Len()
@@ -153,7 +175,7 @@ func internalGetPokemonInArea[F any](
 					returnKeys = append(returnKeys, pokemonId)
 					pokemonMatched++
 					if pokemonMatched > maxPokemon {
-						log.Infof("GetPokemonInArea - result would exceed maximum size (%d), stopping scan", maxPokemon)
+						log.Infof("%s - result would exceed maximum size (%d), stopping scan", label, maxPokemon)
 						return false
 					}
 				}
@@ -164,7 +186,7 @@ func internalGetPokemonInArea[F any](
 	}
 
 	performScan()
-	log.Infof("GetPokemonInArea - scan time %s (locked time %s), %d scanned, %d skipped, %d returned", time.Since(start), lockedTime, pokemonExamined, pokemonSkipped, len(returnKeys))
+	log.Infof("%s - scan time %s (locked time %s), %d scanned, %d skipped, %d returned", label, time.Since(start), lockedTime, pokemonExamined, pokemonSkipped, len(returnKeys))
 
 	return returnKeys, pokemonExamined, pokemonSkipped, totalPokemon
 }

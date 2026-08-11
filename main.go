@@ -393,6 +393,7 @@ func main() {
 	registerPokemonReadRoutes(humaAPI)
 	registerTier3Routes(humaAPI)
 	registerTier4Routes(humaAPI)
+	registerCustomRoutes(humaAPI)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),

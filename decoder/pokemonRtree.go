@@ -177,6 +177,7 @@ func handlePokemonEviction(pokemon *Pokemon) {
 	}
 	if item, ok := pokemonLookupCache.LoadAndDelete(pokemonId); ok && item.HasLookup {
 		adjustPokemonFormCount(pokemonFormKey{item.PokemonLookup.PokemonId, item.PokemonLookup.Form}, -1)
+		notableTreeEvictionCleanup(item, pokemonId, pokemon.Lat, pokemon.Lon)
 	}
 	// Non-blocking: eviction callbacks are one goroutine per item and this
 	// one holds the entity lock — see treeEvictor.Enqueue for the incident
@@ -235,6 +236,7 @@ func updatePokemonLookup(pokemon *Pokemon, changePvp bool, pvpResults map[string
 	pokemonId := uint64(pokemon.Id)
 
 	pokemonLookupCacheItem, existed := pokemonLookupCache.Load(pokemonId)
+	oldItem := pokemonLookupCacheItem // pre-update copy for the notable index (fork addition)
 
 	// Track old form key so we can adjust counts
 	var oldKey pokemonFormKey
@@ -276,6 +278,7 @@ func updatePokemonLookup(pokemon *Pokemon, changePvp bool, pvpResults map[string
 	}
 
 	pokemonLookupCache.Store(pokemonId, pokemonLookupCacheItem)
+	syncNotableTree(pokemon, oldItem, existed, pokemonLookupCacheItem.PokemonLookup)
 
 	// Update form counts
 	newKey := pokemonFormKey{pokemonLookupCacheItem.PokemonLookup.PokemonId, pokemonLookupCacheItem.PokemonLookup.Form}
