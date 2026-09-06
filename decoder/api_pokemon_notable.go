@@ -86,7 +86,7 @@ func GetNotablePokemonInArea(retrieveParameters ApiPokemonScan2) []*ApiPokemonRe
 	for _, key := range returnKeys {
 		pokemon, unlock, _ := peekPokemonRecordReadOnly(key, "API.Notable")
 		if pokemon != nil {
-			if pokemon.ExpireTimestamp.ValueOrZero() > startUnix {
+			if int64OrZero(pokemon.ExpireTimestamp) > startUnix {
 				apiPokemon := buildApiPokemonResult(pokemon)
 				results = append(results, &apiPokemon)
 			}

@@ -286,7 +286,7 @@ func StartWorkerBacklogReporter() {
 				sc.SetWorkerBacklog("tree_evictor_pokemon", float64(pokemonTreeEvictor.QueueLen()))
 			}
 			if notableTreeEvictor != nil {
-				statsCollector.SetWorkerBacklog("tree_evictor_notable", float64(notableTreeEvictor.QueueLen()))
+				sc.SetWorkerBacklog("tree_evictor_notable", float64(notableTreeEvictor.QueueLen()))
 			}
 			if fortTreeEvictor != nil {
 				sc.SetWorkerBacklog("tree_evictor_fort", float64(fortTreeEvictor.QueueLen()))

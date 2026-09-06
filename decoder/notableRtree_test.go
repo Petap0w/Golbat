@@ -64,7 +64,7 @@ func TestSyncNotableTreeTransitions(t *testing.T) {
 	const id uint64 = 920001
 	notable := PokemonLookup{PokemonId: 25, Atk: 15, Def: 15, Sta: 15, Size: 3}
 	ordinary := PokemonLookup{PokemonId: 25, Atk: 7, Def: 8, Sta: 9, Size: 3}
-	p := &Pokemon{PokemonData: PokemonData{Id: Uint64Str(id), Lat: 10.5, Lon: 20.5, PokemonId: 25, Form: null.IntFrom(0)}}
+	p := &Pokemon{PokemonData: PokemonData{Id: Uint64Str(id), Lat: 10.5, Lon: 20.5, PokemonId: 25, Form: null.ValueFrom(uint16(0))}}
 	p.oldValues.Lat, p.oldValues.Lon = 10.5, 20.5
 
 	// Not notable -> not notable: no point appears.

@@ -471,7 +471,7 @@ func TestStationWebhookLegacyBattleSeedWireFormat(t *testing.T) {
 
 	var withBattle StationWebhook
 	applyTopStationBattleToStationWebhook(&withBattle, []StationBattleData{
-		testStationBattle("station-1", 8443669687878199535, 1, now-60, now+1800, 527),
+		testStationBattle(testStationId(t, 1), 8443669687878199535, 1, now-60, now+1800, 527),
 	})
 	marshalled, err := json.Marshal(withBattle)
 	if err != nil {
